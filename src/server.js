@@ -14,7 +14,6 @@ const morgan = require('morgan');
 const connectDB = require('./config/db');
 const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
-const AppError = require('./utils/AppError');
 
 const User = require('./models/User');
 const { ROLES } = require('./models/User');
@@ -47,13 +46,22 @@ const ensureSuperAdmin = async () => {
 };
 
 /* ─────────────────────────────────────────────
-   SECURITY
+   SECURITY (FIXED FOR IP / HTTP)
 ───────────────────────────────────────────── */
 app.use(
   helmet({
-    contentSecurityPolicy: false, // IMPORTANT for Vite React build
+    contentSecurityPolicy: false,
+    crossOriginOpenerPolicy: false,
+    originAgentCluster: false,
   })
 );
+
+// Remove problematic headers for HTTP/IP setups
+app.use((req, res, next) => {
+  res.removeHeader('Cross-Origin-Opener-Policy');
+  res.removeHeader('Origin-Agent-Cluster');
+  next();
+});
 
 app.use(mongoSanitize());
 app.set('trust proxy', 1);
@@ -64,6 +72,8 @@ app.set('trust proxy', 1);
 const limiter = rateLimit({
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
   max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
+  standardHeaders: true,
+  legacyHeaders: false,
 });
 
 const apiLimiter = rateLimit({
@@ -75,7 +85,7 @@ app.use('/api/', limiter);
 app.use('/api/public/', apiLimiter);
 
 /* ─────────────────────────────────────────────
-   CORS (DEV ONLY)
+   CORS (ONLY DEV OR CROSS CLIENT USE)
 ───────────────────────────────────────────── */
 const isDev = process.env.NODE_ENV === 'development';
 
@@ -114,7 +124,7 @@ app.get('/health', (req, res) => {
 app.use('/api/v1', routes);
 
 /* ─────────────────────────────────────────────
-   FRONTEND BUILD PATH (FIXED)
+   FRONTEND BUILD (CLEAN + SINGLE SOURCE)
 ───────────────────────────────────────────── */
 const frontendDistPath = path.join(__dirname, 'frontend', 'dist');
 const indexPath = path.join(frontendDistPath, 'index.html');
@@ -122,25 +132,16 @@ const indexPath = path.join(frontendDistPath, 'index.html');
 if (fs.existsSync(indexPath)) {
   console.log('Serving frontend from:', frontendDistPath);
 
-  /* STEP 1: serve static files correctly */
+  // Serve static assets
   app.use(
     express.static(frontendDistPath, {
       maxAge: '1d',
-      setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.js')) {
-          res.setHeader('Content-Type', 'text/javascript');
-        }
-        if (filePath.endsWith('.css')) {
-          res.setHeader('Content-Type', 'text/css');
-        }
-      },
     })
   );
 
-  /* STEP 2: SPA fallback */
+  // SPA fallback (IMPORTANT)
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api')) return res.status(404).end();
-
     res.sendFile(indexPath);
   });
 } else {
@@ -151,21 +152,15 @@ if (fs.existsSync(indexPath)) {
 /* ─────────────────────────────────────────────
    API 404 HANDLER
 ───────────────────────────────────────────── */
-// 1. API routes FIRST
-app.use('/api/v1', routes);
-
-// 2. STATIC frontend
-app.use(express.static(frontendDistPath));
-
-// 3. SPA fallback LAST (CRITICAL)
-app.get('*', (req, res) => {
-  if (req.path.startsWith('/api')) return res.status(404).end();
-
-  res.sendFile(path.join(frontendDistPath, 'index.html'));
+app.all('/api/*', (req, res) => {
+  res.status(404).json({
+    status: 'fail',
+    message: 'API route not found',
+  });
 });
 
 /* ─────────────────────────────────────────────
-   ERROR HANDLER
+   GLOBAL ERROR HANDLER
 ───────────────────────────────────────────── */
 app.use(errorHandler);
 
@@ -178,9 +173,10 @@ const start = async () => {
   await connectDB();
   await ensureSuperAdmin();
 
-  app.listen(PORT, () => {
+  app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
-    console.log(`Frontend: http://localhost:${PORT}`);
+    console.log(`API: http://0.0.0.0:${PORT}/api/v1`);
+    console.log(`Frontend: http://0.0.0.0:${PORT}`);
   });
 };
 
