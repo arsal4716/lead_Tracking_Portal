@@ -84,7 +84,7 @@ const runValidation = async (campaign, data) => {
   const result = { jornaya: { enabled: false }, trustedForm: { enabled: false } };
 
   if (campaign.jornayaEnabled) {
-    const lac     = data.jornaya_lac || data.leadid_token || data.universal_leadid;
+    const lac     = data.jornaya_leadid || data.leadid_token || data.universal_leadid;
     const jResult = await validateJornaya(lac);
     result.jornaya = { enabled: true, valid: jResult.valid, transId: jResult.transId, message: jResult.message };
     if (!jResult.valid) throw new AppError(`Jornaya validation failed: ${jResult.message}`, 422);

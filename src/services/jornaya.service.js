@@ -12,7 +12,7 @@ const validateJornaya = async (lac) => {
     const response = await axios.get(url, {
       params: {
         lac,
-        id: process.env.JORNAYA_API_ID || '675C7AD0-766C-086F-2192-FC4BF16CACF6',
+        id: process.env.JORNAYA_API_ID,
       },
       timeout: 8000,
     });
