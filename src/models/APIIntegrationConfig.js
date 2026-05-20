@@ -17,7 +17,7 @@ const apiIntegrationSchema = new mongoose.Schema(
       of: String,
       default: {},
     },
-    timeout: { type: Number, default: 5001 },
+    timeout: { type: Number, default: 7001 },
     isActive: { type: Boolean, default: true },
   },
   { timestamps: true }
