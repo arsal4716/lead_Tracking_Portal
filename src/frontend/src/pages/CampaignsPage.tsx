@@ -17,16 +17,16 @@ import {
 import type { Campaign } from '@/types';
 
 export default function CampaignsPage() {
-  const { user }   = useAuthStore();
-  const qc         = useQueryClient();
-  const navigate   = useNavigate();
-  const [search,   setSearch]   = useState('');
+  const { user } = useAuthStore();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+  const [search, setSearch] = useState('');
   const [copiedId, setCopiedId] = useState<string | null>(null);
-  const [page,     setPage]     = useState(1);
+  const [page, setPage] = useState(1);
 
   const { data, isLoading } = useQuery({
     queryKey: ['campaigns', { search, page }],
-    queryFn:  () => campaignService.getAll({ search, page, limit: 20 }),
+    queryFn: () => campaignService.getAll({ search, page, limit: 20 }),
   });
 
   const toggleMutation = useMutation({
@@ -49,39 +49,44 @@ export default function CampaignsPage() {
   });
 
   const campaigns: Campaign[] = data?.data?.data || [];
-  const meta                  = data?.data?.meta;
-  const isSuperAdmin          = user?.role === 'super_admin';
-  const canManage             = isSuperAdmin || user?.role === 'admin';
+  const meta = data?.data?.meta;
+  const isSuperAdmin = user?.role === 'super_admin';
+  const canManage = isSuperAdmin || user?.role === 'admin';
 
-  // Build enrich URL with all campaign fields appended as {placeholder} query params
+  const API_BASE =
+    window.location.origin || `http://91.108.112.198:7001/`;
+
   const buildEnrichUrl = (campaign: Campaign): string => {
-    const publisherId = campaign.publisher && typeof campaign.publisher === 'object'
-      ? (campaign.publisher as any)._id
-      : campaign.publisher;
+    const publisherId =
+      typeof campaign.publisher === 'object'
+        ? (campaign.publisher as any)._id
+        : campaign.publisher;
 
-    const base = `${window.location.origin}/api/v1/public/enrich/${publisherId}/${campaign._id}`;
+    const base = `${API_BASE}/api/v1/public/enrich/${publisherId}/${campaign._id}`;
 
-    if (!campaign.fields || campaign.fields.length === 0) return base;
+    if (!campaign.fields?.length) return base;
 
     const params = new URLSearchParams();
-    [...campaign.fields]
+
+    campaign.fields
       .filter((cf: any) => cf.includeInRingba !== false)
       .sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0))
       .forEach((cf: any) => {
         const field = cf.field;
         if (!field) return;
+
         if (['token_jornaya', 'token_trustedform', 'hidden'].includes(field.type)) return;
-        const paramKey = field.ringbaParamKey || field.key;
-        params.append(paramKey, `{${field.key}}`);
+
+        const key = field.ringbaParamKey || field.key;
+        params.append(key, `{${field.key}}`);
       });
 
-    const qs = params.toString();
-    return qs ? `${base}?${qs}` : base;
+    return params.toString() ? `${base}?${params}` : base;
   };
 
   const handleCopy = async (campaign: Campaign) => {
     const url = buildEnrichUrl(campaign);
-    const ok  = await copyToClipboard(url);
+    const ok = await copyToClipboard(url);
     if (ok) {
       setCopiedId(campaign._id);
       toast.success('Enrich URL copied!');
@@ -275,6 +280,8 @@ export default function CampaignsPage() {
       <Card className="border-blue-200 bg-blue-50/50">
         <CardContent className="p-4">
           <div className="flex items-start gap-3">
+
+
             <Link2 className="h-5 w-5 text-blue-600 mt-0.5 flex-shrink-0" />
             <div>
               <p className="text-sm font-medium text-blue-900">Enrich URL includes all campaign fields</p>

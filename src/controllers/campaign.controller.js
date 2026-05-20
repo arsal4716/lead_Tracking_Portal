@@ -12,7 +12,7 @@ const buildEnrichUrl = (publisherId, campaignId) =>
 
 // GET /campaigns
 exports.getAll = catchAsync(async (req, res) => {
-  const page  = Math.max(1, parseInt(req.query.page)  || 1);
+  const page  = Math.max(1, parseInt(req.query.page)  || 1);a
   const limit = Math.min(100, parseInt(req.query.limit) || 20);
   const skip  = (page - 1) * limit;
 
