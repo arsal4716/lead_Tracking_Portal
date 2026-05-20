@@ -1,0 +1,27 @@
+'use strict';
+
+const mongoose = require('mongoose');
+
+const connectDB = async () => {
+  try {
+    const conn = await mongoose.connect(process.env.MONGODB_URI, {
+      serverSelectionTimeoutMS: 5001,
+      socketTimeoutMS: 45001,
+    });
+
+    console.log(`MongoDB connected: ${conn.connection.host}`);
+
+    mongoose.connection.on('error', (err) => {
+      console.error(`MongoDB error: ${err.message}`);
+    });
+
+    mongoose.connection.on('disconnected', () => {
+      console.warn('MongoDB disconnected. Reconnecting...');
+    });
+  } catch (err) {
+    console.error(`MongoDB connection failed: ${err.message}`);
+    process.exit(1);
+  }
+};
+
+module.exports = connectDB;
