@@ -54,35 +54,37 @@ export default function CampaignsPage() {
   const canManage = isSuperAdmin || user?.role === 'admin';
 
   const API_BASE =
-    window.location.origin || `http://91.108.112.198:7001/`;
+  'http://91.108.112.198:7001';
 
-  const buildEnrichUrl = (campaign: Campaign): string => {
-    const publisherId =
-      typeof campaign.publisher === 'object'
-        ? (campaign.publisher as any)._id
-        : campaign.publisher;
+const normalizeBase = (url: string) => url.replace(/\/$/, '');
 
-    const base = `${API_BASE}/api/v1/public/enrich/${publisherId}/${campaign._id}`;
+const buildEnrichUrl = (campaign: Campaign): string => {
+  const publisherId =
+    typeof campaign.publisher === 'object'
+      ? (campaign.publisher as any)._id
+      : campaign.publisher;
 
-    if (!campaign.fields?.length) return base;
+  const base = `${normalizeBase(API_BASE)}/api/v1/public/enrich/${publisherId}/${campaign._id}`;
 
-    const params = new URLSearchParams();
+  if (!campaign.fields?.length) return base;
 
-    campaign.fields
-      .filter((cf: any) => cf.includeInRingba !== false)
-      .sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0))
-      .forEach((cf: any) => {
-        const field = cf.field;
-        if (!field) return;
+  const params = new URLSearchParams();
 
-        if (['token_jornaya', 'token_trustedform', 'hidden'].includes(field.type)) return;
+  campaign.fields
+    .filter((cf: any) => cf.includeInRingba !== false)
+    .sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0))
+    .forEach((cf: any) => {
+      const field = cf.field;
+      if (!field) return;
 
-        const key = field.ringbaParamKey || field.key;
-        params.append(key, `{${field.key}}`);
-      });
+      if (['token_jornaya', 'token_trustedform', 'hidden'].includes(field.type)) return;
 
-    return params.toString() ? `${base}?${params}` : base;
-  };
+      const key = field.ringbaParamKey || field.key;
+      params.append(key, `{${field.key}}`);
+    });
+
+  return params.toString() ? `${base}?${params.toString()}` : base;
+};
 
   const handleCopy = async (campaign: Campaign) => {
     const url = buildEnrichUrl(campaign);
