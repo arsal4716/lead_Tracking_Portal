@@ -22,8 +22,8 @@ publisherRouter.get(   '/',                 publisherCtrl.getAll);
 publisherRouter.post(  '/',                 validate(schemas.createPublisher), publisherCtrl.create);
 publisherRouter.get(   '/:id',              publisherCtrl.getOne);
 publisherRouter.patch( '/:id',              publisherCtrl.update);
-publisherRouter.patch( '/:id/toggle',       publisherCtrl.toggleActive);
-publisherRouter.delete('/:id',              publisherCtrl.delete);
+publisherRouter.patch( '/:id/toggle',       publisherCtrl.toggleActive);    // pause/unpause
+publisherRouter.delete('/:id',              publisherCtrl.delete);           // permanent delete
 publisherRouter.post(  '/:id/rotate-key',   publisherCtrl.rotateApiKey);
 publisherRouter.patch( '/:id/ip-whitelist', publisherCtrl.updateIpWhitelist);
 
@@ -36,8 +36,8 @@ campaignRouter.post(  '/',                restrictTo(ROLES.SUPER_ADMIN, ROLES.AD
 campaignRouter.get(   '/:id',            campaignCtrl.getOne);
 campaignRouter.get(   '/:id/enrich-url', campaignCtrl.getEnrichUrl);
 campaignRouter.patch( '/:id',            restrictTo(ROLES.SUPER_ADMIN, ROLES.ADMIN), campaignCtrl.update);
-campaignRouter.patch( '/:id/toggle',     restrictTo(ROLES.SUPER_ADMIN, ROLES.ADMIN), campaignCtrl.toggleActive);
-campaignRouter.delete('/:id',            restrictTo(ROLES.SUPER_ADMIN),              campaignCtrl.delete);
+campaignRouter.patch( '/:id/toggle',     restrictTo(ROLES.SUPER_ADMIN, ROLES.ADMIN), campaignCtrl.toggleActive); // pause/unpause
+campaignRouter.delete('/:id',            restrictTo(ROLES.SUPER_ADMIN),              campaignCtrl.delete);        // permanent delete
 
 // ── Fields ─────────────────────────────────────────────────────────────────────
 const fieldRouter = require('express').Router();
@@ -53,11 +53,13 @@ fieldRouter.delete('/:id', restrictTo(ROLES.SUPER_ADMIN), fieldCtrl.delete);
 const submissionRouter = require('express').Router();
 const submissionCtrl   = require('../controllers/submission.controller');
 submissionRouter.use(protect, tenantIsolation);
-submissionRouter.get( '/stats',      submissionCtrl.getStats);
-submissionRouter.get( '/',           submissionCtrl.getAll);
-submissionRouter.post('/',           validate(schemas.submitLead), submissionCtrl.submit);
-submissionRouter.get( '/:id',        submissionCtrl.getOne);
-submissionRouter.post('/:id/repost', validate(schemas.repostLead), submissionCtrl.repost);
+submissionRouter.get(   '/stats',       submissionCtrl.getStats);
+submissionRouter.get(   '/',            submissionCtrl.getAll);
+submissionRouter.post(  '/',            validate(schemas.submitLead), submissionCtrl.submit);
+submissionRouter.get(   '/:id',         submissionCtrl.getOne);
+submissionRouter.post(  '/:id/repost',  validate(schemas.repostLead), submissionCtrl.repost);
+// Reset — super_admin only; clears ALL submission records (fresh start)
+submissionRouter.delete('/reset',       restrictTo(ROLES.SUPER_ADMIN), submissionCtrl.reset);
 
 // ── Users ──────────────────────────────────────────────────────────────────────
 const userRouter = require('express').Router();
@@ -67,7 +69,7 @@ userRouter.get(   '/',                   userCtrl.getAll);
 userRouter.post(  '/',                   userCtrl.create);
 userRouter.get(   '/:id',               userCtrl.getOne);
 userRouter.patch( '/:id',               userCtrl.update);
-userRouter.patch( '/:id/toggle-active', userCtrl.toggleActive);
+userRouter.patch( '/:id/toggle-active', userCtrl.toggleActive);                        
 userRouter.delete('/:id',               restrictTo(ROLES.SUPER_ADMIN), userCtrl.delete);
 
 // ── Audit logs — SUPER_ADMIN ONLY ─────────────────────────────────────────────
@@ -75,7 +77,7 @@ const auditRouter = require('express').Router();
 const AuditLog    = require('../models/AuditLog');
 const catchAsync  = require('../utils/catchAsync');
 const { sendPaginated } = require('../utils/response');
-auditRouter.use(protect, restrictTo(ROLES.SUPER_ADMIN)); // admins & agents cannot see audit logs
+auditRouter.use(protect, restrictTo(ROLES.SUPER_ADMIN));
 auditRouter.get('/', catchAsync(async (req, res) => {
   const page  = Math.max(1, parseInt(req.query.page)  || 1);
   const limit = Math.min(100, parseInt(req.query.limit) || 20);
@@ -102,7 +104,7 @@ publicRouter.post('/lead-ingest',                     apiKeyAuth, validate(schem
 publicRouter.get( '/enrich/:publisherId/:campaignId', publicCtrl.enrichEndpoint);
 publicRouter.post('/enrich/:publisherId/:campaignId', publicCtrl.enrichEndpoint);
 
-// ── Mount ──────────────────────────────────────────────────────────────────────
+// ── Mount all routers ──────────────────────────────────────────────────────────
 router.use('/auth',        authRouter);
 router.use('/publishers',  publisherRouter);
 router.use('/campaigns',   campaignRouter);

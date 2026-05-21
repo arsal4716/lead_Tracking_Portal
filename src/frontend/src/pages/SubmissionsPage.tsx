@@ -1,429 +1,522 @@
-import { useState, useEffect } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
-import { useForm, Controller, useWatch } from 'react-hook-form';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import { campaignService, submissionService } from '@/services';
+import { submissionService, campaignService, publisherService } from '@/services';
+import { useAuthStore } from '@/stores/authStore';
+import { Card, CardContent } from '@/components/ui/index';
+import { Badge } from '@/components/ui/index';
 import { Button } from '@/components/ui/button';
-import { Input, Label, Textarea, Card, CardContent, CardHeader, CardTitle } from '@/components/ui/index';
+import { Input } from '@/components/ui/index';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/index';
-import { Loader2, CheckCircle, Phone } from 'lucide-react';
-import type { Campaign, CampaignField } from '@/types';
-import { cn } from '@/lib/utils';
+import {
+  Search, RefreshCw, ChevronDown, ChevronUp, Loader2,
+  CheckCircle, XCircle, Minus, ClipboardList, Trash2,
+} from 'lucide-react';
+import { getStatusBadgeColor, getSourceBadgeColor } from '@/lib/utils';
+import type { Submission, Campaign } from '@/types';
 
-// ── Phone cleaning ──────────────────────────────────────────────────────────────
-const cleanPhone = (raw: string): string => {
-  const digits = raw.replace(/\D/g, '');
-  if (digits.length === 11 && digits.startsWith('1')) return digits.slice(1);
-  if (digits.length > 10) return digits.slice(-10);
-  return digits;
+// ── EST timestamp formatter ────────────────────────────────────────────────────
+// Shows full date + time with seconds in Eastern Time
+const formatEST = (iso: string): { date: string; time: string } => {
+  if (!iso) return { date: '—', time: '—' };
+  const d = new Date(iso);
+
+  const datePart = d.toLocaleDateString('en-US', {
+    timeZone: 'America/New_York',
+    month: '2-digit', day: '2-digit', year: 'numeric',
+  });
+
+  const timePart = d.toLocaleTimeString('en-US', {
+    timeZone: 'America/New_York',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+    hour12: true,
+  });
+
+  return { date: datePart, time: timePart };
 };
 
-// ── Types that should NEVER be rendered as form inputs ─────────────────────────
-// Includes 'conditional' for backwards compat with old DB records
-const SKIP_TYPES = new Set([
-  'token_jornaya', 'token_trustedform', 'hidden',
-  'static_value', 'api_autofill',
-  'conditional', // legacy — should be 'number' after migration, skip if still present
-]);
+export default function SubmissionsPage() {
+  const { user } = useAuthStore();
+  const qc       = useQueryClient();
 
-// ── Types that take full width (not paired in 2-col grid) ──────────────────────
-const FULL_WIDTH = new Set(['textarea', 'radio', 'checkbox']);
+  const isSuperAdmin = user?.role === 'super_admin';
+  const isAdmin      = user?.role === 'admin';
+  const isAgent      = user?.role === 'agent';
 
-// ── Evaluate which fields are currently visible ────────────────────────────────
-const evaluateVisible = (fields: CampaignField[], values: Record<string, any>): Set<string> => {
-  const visible = new Set<string>();
+  const [page,        setPage]        = useState(1);
+  const [expandedId,  setExpandedId]  = useState<string | null>(null);
+  const [repostingId, setRepostingId] = useState<string | null>(null);
+  const [showReset,   setShowReset]   = useState(false);
 
-  // All renderable fields visible by default
-  for (const cf of fields) {
-    const f = cf.field;
-    if (!f || SKIP_TYPES.has(f.type)) continue;
-    visible.add(f.key);
-  }
+  const [filters, setFilters] = useState({
+    search:    '',
+    publisher: '',
+    campaign:  '',
+    source:    '',
+    status:    '',
+    from:      '',
+    to:        '',
+  });
 
-  // Apply conditional rules from each source field
-  for (const cf of fields) {
-    const field = cf.field;
-    if (!field || !(field as any).conditionalRules?.length) continue;
+  // ── Queries ──────────────────────────────────────────────────────────────────
+  const { data, isLoading, isFetching } = useQuery({
+    queryKey: ['submissions', filters, page],
+    queryFn: () => submissionService.getAll({
+      phone:     filters.search    || undefined,
+      publisher: filters.publisher || undefined,
+      campaign:  filters.campaign  || undefined,
+      source:    filters.source    || undefined,
+      status:    filters.status    || undefined,
+      from:      filters.from      || undefined,
+      to:        filters.to        || undefined,
+      page,
+      limit: 20,
+    }),
+  });
 
-    for (const rule of (field as any).conditionalRules) {
-      // sourceFieldKey defaults to the field's own key if missing or wrong case
-      const sourceKey = (rule.sourceFieldKey && rule.sourceFieldKey !== field.label)
-        ? rule.sourceFieldKey
-        : field.key;
-      const sourceVal = values[sourceKey];
-
-      let matches = false;
-      switch (rule.operator) {
-        case 'eq':       matches = String(sourceVal ?? '') === String(rule.value ?? ''); break;
-        case 'neq':      matches = String(sourceVal ?? '') !== String(rule.value ?? ''); break;
-        case 'gt':       matches = Number(sourceVal) >  Number(rule.value); break;
-        case 'gte':      matches = Number(sourceVal) >= Number(rule.value); break;
-        case 'lt':       matches = Number(sourceVal) <  Number(rule.value); break;
-        case 'lte':      matches = Number(sourceVal) <= Number(rule.value); break;
-        case 'contains': matches = String(sourceVal ?? '').includes(String(rule.value ?? '')); break;
-        case 'exists':   matches = sourceVal !== undefined && sourceVal !== null && sourceVal !== ''; break;
-      }
-
-      if (rule.action === 'show') {
-        if (matches) visible.add(rule.targetFieldKey);
-        else         visible.delete(rule.targetFieldKey);
-      }
-      if (rule.action === 'hide')    { if (matches) visible.delete(rule.targetFieldKey); }
-      if (rule.action === 'require') { if (matches) visible.add(rule.targetFieldKey); }
-    }
-  }
-
-  return visible;
-};
-
-// ── Group into 2-per-row, full-width types span whole row ──────────────────────
-const buildRows = (fields: CampaignField[]): CampaignField[][] => {
-  const rows: CampaignField[][] = [];
-  let i = 0;
-  while (i < fields.length) {
-    const cf = fields[i];
-    if (FULL_WIDTH.has(cf.field?.type)) {
-      rows.push([cf]); i++;
-    } else if (i + 1 < fields.length && !FULL_WIDTH.has(fields[i + 1]?.field?.type)) {
-      rows.push([cf, fields[i + 1]]); i += 2;
-    } else {
-      rows.push([cf]); i++;
-    }
-  }
-  return rows;
-};
-
-// ── Main component ─────────────────────────────────────────────────────────────
-export default function SubmitLeadPage() {
-  const [selectedCampaignId, setSelectedCampaignId] = useState('');
-  const [submitted, setSubmitted] = useState(false);
-  const [result,    setResult]    = useState<any>(null);
-
+  // Campaigns — scoped to selected publisher for super_admin
   const { data: campaignsData } = useQuery({
-    queryKey: ['my-campaigns'],
-    queryFn:  () => campaignService.getAll({ isActive: true, limit: 100 }),
-  });
-  const campaigns: Campaign[] = campaignsData?.data?.data || [];
-
-  const { data: campaignData, isLoading: loadingCampaign } = useQuery({
-    queryKey: ['campaign-detail', selectedCampaignId],
-    queryFn:  () => campaignService.getOne(selectedCampaignId),
-    enabled:  Boolean(selectedCampaignId),
+    queryKey: ['campaigns-list', filters.publisher],
+    queryFn: () => campaignService.getAll({
+      limit:     100,
+      publisher: filters.publisher || undefined,
+    }),
   });
 
-  const campaign = campaignData?.data?.data?.campaign;
-
-  // All campaign fields, null-safe, sorted
-  const allFields: CampaignField[] = (campaign?.fields || [])
-    .filter((cf: CampaignField) => cf.field != null)
-    .sort((a: CampaignField, b: CampaignField) => a.order - b.order);
-
-  const { register, handleSubmit, reset, control, formState: { errors } } = useForm({ mode: 'onChange' });
-
-  // Live watch for conditional evaluation
-  const formValues = useWatch({ control }) as Record<string, any>;
-
-  useEffect(() => { reset(); }, [selectedCampaignId, reset]);
-
-  // Compute visible fields
-  const visibleKeys = evaluateVisible(allFields, formValues);
-
-  const visibleFields = allFields.filter((cf) => {
-    if (!cf.field) return false;
-    if (SKIP_TYPES.has(cf.field.type)) return false;
-    return visibleKeys.has(cf.field.key);
+  // Publishers — super_admin only
+  const { data: publishersData } = useQuery({
+    queryKey: ['publishers-list'],
+    queryFn:  () => publisherService.getAll({ limit: 100 }),
+    enabled:  isSuperAdmin,
   });
 
-  // Find conditional target fields that are missing from the campaign (not added in Campaign Builder)
-  const missingTargets: string[] = [];
-  for (const cf of allFields) {
-    const rules = (cf.field as any)?.conditionalRules || [];
-    for (const rule of rules) {
-      if (rule.targetFieldKey && visibleKeys.has(rule.targetFieldKey)) {
-        const exists = allFields.some((f) => f.field?.key === rule.targetFieldKey);
-        if (!exists && !missingTargets.includes(rule.targetFieldKey)) {
-          missingTargets.push(rule.targetFieldKey);
-        }
-      }
-    }
-  }
-
-  const submitMutation = useMutation({
-    mutationFn: (formData: Record<string, unknown>) => {
-      const cleaned: Record<string, unknown> = {};
-      for (const [key, val] of Object.entries(formData)) {
-        const fieldDef = allFields.find((cf) => cf.field?.key === key);
-        if (fieldDef?.field?.type === 'phone' && typeof val === 'string') {
-          cleaned[key] = cleanPhone(val);
-        } else {
-          cleaned[key] = val;
-        }
-      }
-      return submissionService.submit(selectedCampaignId, cleaned);
+  // ── Mutations ─────────────────────────────────────────────────────────────────
+  const repostMutation = useMutation({
+    mutationFn: ({ id, targetCampaignId }: { id: string; targetCampaignId: string }) =>
+      submissionService.repost(id, targetCampaignId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['submissions'] });
+      toast.success('Lead reposted successfully!');
+      setRepostingId(null);
     },
-    onSuccess: (res) => { setResult(res.data.data); setSubmitted(true); toast.success('Lead submitted!'); },
-    onError:   (err: any) => toast.error(err.response?.data?.message || 'Submission failed.'),
+    onError: (err: any) => {
+      toast.error(err.response?.data?.message || 'Repost failed.');
+      setRepostingId(null);
+    },
   });
 
-  // ── Render a single field ────────────────────────────────────────────────────
-  const renderField = (cf: CampaignField) => {
-    const field = cf.field;
+  const resetMutation = useMutation({
+    mutationFn: () =>
+      (submissionService as any).reset(),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ['submissions'] });
+      toast.success(res.data.data.message);
+      setShowReset(false);
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Reset failed.'),
+  });
 
-    // Extra safety — skip anything we don't know how to render
-    if (!field || SKIP_TYPES.has(field.type)) return null;
+  // ── Data ──────────────────────────────────────────────────────────────────────
+  const submissions: Submission[] = data?.data?.data || [];
+  const meta                      = data?.data?.meta;
+  const campaigns: Campaign[]     = campaignsData?.data?.data || [];
+  const publishers                = publishersData?.data?.data || [];
 
-    const label       = cf.overrideLabel      || field.label;
-    const placeholder = cf.overridePlaceholder || field.placeholder;
-
-    // A field is required if explicitly set, or a conditional 'require' action is active
-    const isConditionallyRequired = allFields.some((src) =>
-      (src.field as any)?.conditionalRules?.some((r: any) =>
-        r.targetFieldKey === field.key && r.action === 'require' && visibleKeys.has(field.key)
-      )
-    );
-    const required = cf.isRequired || isConditionallyRequired;
-    const error    = (errors as any)[field.key];
-
-    // Phone — custom validation + hint
-    if (field.type === 'phone') {
-      return (
-        <div className="space-y-1.5">
-          <Label htmlFor={field.key}>
-            {label}{required && <span className="text-destructive ml-0.5">*</span>}
-          </Label>
-          <Input
-            id={field.key}
-            type="tel"
-            placeholder={placeholder || '(555) 000-0000'}
-            {...register(field.key, {
-              required: required ? `${label} is required` : false,
-              validate: (v) => {
-                if (!v && !required) return true;
-                return cleanPhone(v).length === 10 ? true : 'Enter a valid 10-digit US phone number';
-              },
-            })}
-          />
-          {error && <p className="text-xs text-destructive">{error.message}</p>}
-        </div>
-      );
+  const setFilter = (key: string, value: string) => {
+    const v = value === 'all' ? '' : value;
+    if (key === 'publisher') {
+      setFilters((p) => ({ ...p, publisher: v, campaign: '' }));
+    } else {
+      setFilters((p) => ({ ...p, [key]: v }));
     }
+    setPage(1);
+  };
 
-    const fieldReg = register(field.key, { required: required ? `${label} is required` : false });
+  const ValidationIcon = ({ valid, enabled }: { valid?: boolean; enabled: boolean }) => {
+    if (!enabled) return <Minus className="h-4 w-4 text-slate-300" />;
+    return valid
+      ? <CheckCircle className="h-4 w-4 text-emerald-500" />
+      : <XCircle    className="h-4 w-4 text-red-500" />;
+  };
 
-    return (
-      <div className="space-y-1.5">
-        <Label htmlFor={field.key}>
-          {label}{required && <span className="text-destructive ml-0.5">*</span>}
-        </Label>
+  // ── Table col count for expandedRow colSpan ───────────────────────────────────
+  // Phone | Campaign | Publisher? | Agent? | Source | J | TF | Status | Date | Time | Actions
+  const colCount = 7 + (isSuperAdmin ? 2 : isAdmin ? 1 : 0) + 1; // +1 for actions
 
-        {['text', 'email', 'number', 'date'].includes(field.type) && (
-          <Input id={field.key} type={field.type} placeholder={placeholder} {...fieldReg} />
-        )}
+  return (
+    <div className="page-container space-y-5">
 
-        {field.type === 'textarea' && (
-          <Textarea id={field.key} placeholder={placeholder} rows={3} {...fieldReg} />
-        )}
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="section-title">Submissions</h1>
+          <p className="text-sm text-muted-foreground">
+            {meta?.total ?? '—'} total{' '}
+            {isFetching && <span className="text-blue-500">· refreshing...</span>}
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm"
+            onClick={() => qc.invalidateQueries({ queryKey: ['submissions'] })}>
+            <RefreshCw className="h-4 w-4 mr-1.5" />Refresh
+          </Button>
+          {/* Reset — super_admin only */}
+          {isSuperAdmin && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-destructive border-destructive/30 hover:bg-destructive/10"
+              onClick={() => setShowReset(true)}
+            >
+              <Trash2 className="h-4 w-4 mr-1.5" />Reset CRM
+            </Button>
+          )}
+        </div>
+      </div>
 
-        {field.type === 'select' && (field.options?.length ?? 0) > 0 && (
-          <Controller name={field.key} control={control}
-            rules={{ required: required ? `${label} is required` : false }}
-            render={({ field: f }) => (
-              <Select onValueChange={f.onChange} value={f.value || ''}>
-                <SelectTrigger id={field.key}>
-                  <SelectValue placeholder={`Select ${label}...`} />
-                </SelectTrigger>
+      {/* Reset confirmation modal */}
+      {showReset && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <Card className="w-full max-w-sm">
+            <CardContent className="p-6 space-y-4">
+              <div className="text-center">
+                <Trash2 className="h-10 w-10 text-destructive mx-auto mb-3" />
+                <h2 className="font-semibold text-base">Reset All Submissions</h2>
+                <p className="text-sm text-muted-foreground mt-1">
+                  This permanently deletes <strong>all submission records</strong> across all publishers.
+                  The CRM will start fresh from 0.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button variant="outline" className="flex-1" onClick={() => setShowReset(false)}>Cancel</Button>
+                <Button
+                  variant="destructive"
+                  className="flex-1"
+                  loading={resetMutation.isPending}
+                  onClick={() => resetMutation.mutate()}
+                >
+                  Yes, Reset All
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
+
+      {/* Filters */}
+      <Card>
+        <CardContent className="p-4">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+
+            {/* Phone search */}
+            <div className="relative col-span-2 sm:col-span-1">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground" />
+              <Input placeholder="Phone..." className="pl-8 h-8 text-xs" value={filters.search}
+                onChange={(e) => setFilter('search', e.target.value)} />
+            </div>
+
+            {/* Publisher — super_admin only */}
+            {isSuperAdmin && (
+              <Select value={filters.publisher || 'all'} onValueChange={(v) => setFilter('publisher', v)}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All publishers" /></SelectTrigger>
                 <SelectContent>
-                  {field.options!.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                  <SelectItem value="all">All publishers</SelectItem>
+                  {publishers.map((p: any) => (
+                    <SelectItem key={p._id} value={p._id}>{p.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             )}
-          />
-        )}
 
-        {field.type === 'radio' && (field.options?.length ?? 0) > 0 && (
-          <Controller name={field.key} control={control}
-            rules={{ required: required ? `${label} is required` : false }}
-            render={({ field: f }) => (
-              <div className="flex flex-wrap gap-4 pt-1">
-                {field.options!.map((opt) => (
-                  <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-                    <input type="radio" value={opt.value} checked={f.value === opt.value}
-                      onChange={() => f.onChange(opt.value)} className="accent-primary" />
-                    <span className="text-sm">{opt.label}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          />
-        )}
-
-        {field.type === 'checkbox' && (field.options?.length ?? 0) > 0 && (
-          <Controller name={field.key} control={control}
-            rules={{ required: required ? `${label} is required` : false }}
-            render={({ field: f }) => (
-              <div className="flex flex-wrap gap-4 pt-1">
-                {field.options!.map((opt) => (
-                  <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
-                    <input type="checkbox" value={opt.value}
-                      checked={Array.isArray(f.value) ? f.value.includes(opt.value) : false}
-                      onChange={(e) => {
-                        const cur = Array.isArray(f.value) ? f.value : [];
-                        f.onChange(e.target.checked ? [...cur, opt.value] : cur.filter((v: string) => v !== opt.value));
-                      }} className="accent-primary rounded" />
-                    <span className="text-sm">{opt.label}</span>
-                  </label>
-                ))}
-              </div>
-            )}
-          />
-        )}
-
-        {field.type === 'checkbox' && !(field.options?.length) && (
-          <label className="flex items-center gap-2 cursor-pointer pt-1">
-            <input type="checkbox" {...fieldReg} className="accent-primary rounded" />
-            <span className="text-sm">{placeholder || label}</span>
-          </label>
-        )}
-
-        {error && <p className="text-xs text-destructive">{error.message}</p>}
-      </div>
-    );
-  };
-
-  // ── Success screen ───────────────────────────────────────────────────────────
-  if (submitted && result) {
-    return (
-      <div className="page-container max-w-lg">
-        <Card className="shadow-md">
-          <CardContent className="py-12 text-center space-y-4">
-            <div className="h-16 w-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
-              <CheckCircle className="h-8 w-8 text-emerald-500" />
-            </div>
-            <h2 className="text-xl font-semibold">Lead Submitted!</h2>
-            <p className="text-sm text-muted-foreground">
-              {result.status === 'sent' ? 'Lead sent successfully.' : 'Lead saved — delivery failed.'}
-            </p>
-            <div className="p-4 rounded-xl bg-slate-50 border text-sm text-left space-y-2.5">
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Submission ID</span>
-                <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{result.submissionId}</code>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-muted-foreground">Status</span>
-                <span className={cn('font-semibold', result.status === 'sent' ? 'text-emerald-600' : 'text-red-500')}>
-                  {result.status === 'sent' ? '✓ Sent' : '✗ Failed'}
-                </span>
-              </div>
-              {result.isDuplicate && (
-                <div className="flex justify-between">
-                  <span className="text-muted-foreground">Note</span>
-                  <span className="text-amber-600 font-medium">Duplicate phone</span>
-                </div>
-              )}
-            </div>
-            <div className="flex gap-3 justify-center pt-2">
-              <Button onClick={() => { setSubmitted(false); setResult(null); reset(); }}>Submit Another</Button>
-              <Button variant="outline" onClick={() => window.location.href = '/submissions'}>View Submissions</Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  // ── Form ─────────────────────────────────────────────────────────────────────
-  return (
-    <div className="page-container max-w-3xl space-y-6">
-
-      <div className="flex items-center gap-3">
-        <div className="h-10 w-10 rounded-xl bg-blue-600 flex items-center justify-center shadow-md shadow-blue-600/20">
-          <Phone className="h-5 w-5 text-white" />
-        </div>
-        <div>
-          <h1 className="section-title">Submit Lead</h1>
-          <p className="text-sm text-muted-foreground">Select a campaign and fill in lead details.</p>
-        </div>
-      </div>
-
-      {/* Campaign selector */}
-      <Card className="shadow-sm">
-        <CardContent className="p-5">
-          <div className="space-y-2">
-            <Label className="font-medium">Campaign *</Label>
-            <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
-              <SelectTrigger className="h-10">
-                <SelectValue placeholder="Select a campaign..." />
-              </SelectTrigger>
+            {/* Campaign */}
+            <Select value={filters.campaign || 'all'} onValueChange={(v) => setFilter('campaign', v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All campaigns" /></SelectTrigger>
               <SelectContent>
+                <SelectItem value="all">All campaigns</SelectItem>
                 {campaigns.map((c) => (
                   <SelectItem key={c._id} value={c._id}>{c.name}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
+
+            {/* Source */}
+            <Select value={filters.source || 'all'} onValueChange={(v) => setFilter('source', v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All sources" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All sources</SelectItem>
+                <SelectItem value="form">Form</SelectItem>
+                <SelectItem value="api">API</SelectItem>
+                <SelectItem value="repost">Repost</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Status */}
+            <Select value={filters.status || 'all'} onValueChange={(v) => setFilter('status', v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All statuses" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All statuses</SelectItem>
+                <SelectItem value="sent">Sent</SelectItem>
+                <SelectItem value="failed">Failed</SelectItem>
+                <SelectItem value="valid">Valid</SelectItem>
+              </SelectContent>
+            </Select>
+
+            {/* Date range */}
+            <Input type="date" className="h-8 text-xs" value={filters.from}
+              onChange={(e) => setFilter('from', e.target.value)} />
+            <Input type="date" className="h-8 text-xs" value={filters.to}
+              onChange={(e) => setFilter('to', e.target.value)} />
           </div>
-          {campaign && (
-            <div className="mt-3 flex flex-wrap gap-2 text-xs">
-              <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded-full">{visibleFields.length} fields</span>
-              {campaign.jornayaEnabled     && <span className="bg-amber-100 text-amber-700 px-2 py-1 rounded-full">Jornaya</span>}
-              {campaign.trustedFormEnabled && <span className="bg-blue-100 text-blue-700 px-2 py-1 rounded-full">TrustedForm</span>}
+        </CardContent>
+      </Card>
+
+      {/* Table */}
+      <Card>
+        <CardContent className="p-0">
+          {isLoading ? (
+            <div className="flex items-center justify-center h-48">
+              <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+            </div>
+          ) : submissions.length === 0 ? (
+            <div className="flex flex-col items-center justify-center h-48 text-muted-foreground">
+              <ClipboardList className="h-8 w-8 mb-2 opacity-30" />
+              <p className="text-sm">No submissions found.</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b bg-slate-50">
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Phone</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Campaign</th>
+                    {isSuperAdmin && (
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Publisher</th>
+                    )}
+                    {!isAgent && (
+                      <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Agent</th>
+                    )}
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Source</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">J</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">TF</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Status</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Date (EST)</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Time (EST)</th>
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {submissions.map((sub) => {
+                    const est = formatEST(sub.createdAt);
+                    return (
+                      <>
+                        <tr
+                          key={sub._id}
+                          className="hover:bg-slate-50/80 transition-colors cursor-pointer"
+                          onClick={() => setExpandedId(expandedId === sub._id ? null : sub._id)}
+                        >
+                          {/* Phone */}
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              {expandedId === sub._id
+                                ? <ChevronUp   className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
+                                : <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />}
+                              <code className="text-xs font-mono text-slate-700">{sub.phone ||  '—'}</code>
+                              {sub.isDuplicate && (
+                                <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">DUP</span>
+                              )}
+                            </div>
+                          </td>
+
+                          {/* Campaign — null-safe */}
+                          <td className="px-4 py-3 text-xs text-slate-600">
+                            {sub.campaign && typeof sub.campaign === 'object'
+                              ? (sub.campaign as any).name || '—'
+                              : '—'}
+                          </td>
+
+                          {/* Publisher — super_admin only */}
+                          {isSuperAdmin && (
+                            <td className="px-4 py-3 text-xs text-slate-500">
+                              {sub.publisher && typeof sub.publisher === 'object'
+                                ? (sub.publisher as any).name || '—'
+                                : '—'}
+                            </td>
+                          )}
+
+                          {/* Agent — admin + super_admin */}
+                          {!isAgent && (
+                            <td className="px-4 py-3 text-xs text-slate-500">
+                              {sub.agent && typeof sub.agent === 'object'
+                                ? (sub.agent as any).name || '—'
+                                : '—'}
+                            </td>
+                          )}
+
+                          {/* Source */}
+                          <td className="px-4 py-3">
+                            <Badge className={getSourceBadgeColor(sub.source)}>{sub.source}</Badge>
+                          </td>
+
+                          {/* Jornaya */}
+                          <td className="px-4 py-3">
+                            <ValidationIcon valid={sub.jornaya?.valid} enabled={sub.jornaya?.enabled} />
+                          </td>
+
+                          {/* TrustedForm */}
+                          <td className="px-4 py-3">
+                            <ValidationIcon valid={sub.trustedForm?.valid} enabled={sub.trustedForm?.enabled} />
+                          </td>
+
+                          {/* Status */}
+                          <td className="px-4 py-3">
+                            <Badge className={getStatusBadgeColor(sub.status)}>{sub.status}</Badge>
+                          </td>
+
+                          {/* Date EST */}
+                          <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">
+                            {est.date}
+                          </td>
+
+                          {/* Time EST — with seconds */}
+                          <td className="px-4 py-3">
+                            <code className="text-xs font-mono text-slate-700 whitespace-nowrap">
+                              {est.time}
+                            </code>
+                          </td>
+
+                          {/* Actions */}
+                          <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                            <RepostMenu
+                              submissionId={sub._id}
+                              currentCampaignId={
+                                sub.campaign && typeof sub.campaign === 'object'
+                                  ? (sub.campaign as any)._id
+                                  : String(sub.campaign)
+                              }
+                              campaigns={campaigns}
+                              isLoading={repostingId === sub._id && repostMutation.isPending}
+                              onRepost={(targetId) => {
+                                setRepostingId(sub._id);
+                                repostMutation.mutate({ id: sub._id, targetCampaignId: targetId });
+                              }}
+                            />
+                          </td>
+                        </tr>
+
+                        {/* Expanded detail row */}
+                        {expandedId === sub._id && (
+                          <tr key={`${sub._id}-exp`} className="bg-slate-50/60">
+                            <td colSpan={colCount} className="px-6 py-4">
+
+                              {/* Field data grid */}
+                              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2.5 mb-3">
+                                {sub.data && Object.entries(sub.data)
+                                  .filter(([k]) => !k.startsWith('_'))
+                                  .map(([key, val]) => (
+                                    <div key={key} className="bg-white rounded-lg p-2.5 border border-slate-100 shadow-sm">
+                                      <p className="text-xs text-slate-400 mb-0.5">{key}</p>
+                                      <p className="text-sm font-medium text-slate-700 truncate">{String(val ?? '—')}</p>
+                                    </div>
+                                  ))}
+                              </div>
+
+                              {/* Destination results */}
+                              {(sub as any).destinationResults &&
+                               Object.keys((sub as any).destinationResults).length > 0 && (
+                                <div className="flex gap-2 flex-wrap mb-2">
+                                  {Object.entries((sub as any).destinationResults).map(([dest, result]: [string, any]) => (
+                                    <div key={dest}
+                                      className={`text-xs px-2.5 py-1.5 rounded-full font-medium ${result.sent ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
+                                      {dest}: {result.sent ? '✓ sent' : `✗ ${result.error || 'failed'}`}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Ringba error */}
+                              {!sub.ringba?.sent && sub.ringba?.error && (
+                                <div className="p-2.5 rounded-lg border border-red-200 bg-red-50 text-xs text-red-600">
+                                  <strong>Ringba error:</strong> {sub.ringba.error}
+                                </div>
+                              )}
+
+                              {/* Full timestamp */}
+                              <p className="text-xs text-slate-400 mt-2">
+                                Submitted: {formatEST(sub.createdAt).date} at {formatEST(sub.createdAt).time} EST
+                              </p>
+                            </td>
+                          </tr>
+                        )}
+                      </>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Dynamic form */}
-      {selectedCampaignId && (
-        loadingCampaign ? (
-          <div className="flex items-center justify-center h-32">
-            <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      {/* Pagination */}
+      {meta && meta.pages > 1 && (
+        <div className="flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
+            Page {meta.page} of {meta.pages} · {meta.total} total
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" disabled={page <= 1} onClick={() => setPage((p) => p - 1)}>
+              Previous
+            </Button>
+            <Button variant="outline" size="sm" disabled={page >= meta.pages} onClick={() => setPage((p) => p + 1)}>
+              Next
+            </Button>
           </div>
-        ) : campaign && visibleFields.length > 0 ? (
-          <form onSubmit={handleSubmit((d) => submitMutation.mutate(d as Record<string, unknown>))}>
-            <Card className="shadow-sm">
-              <CardHeader className="pb-2 pt-5 px-6">
-                <CardTitle className="text-base font-semibold">{campaign.name}</CardTitle>
-              </CardHeader>
-              <CardContent className="px-6 pb-6 pt-3 space-y-4">
-                {/* Warning: conditional target fields not added to campaign */}
-                {missingTargets.length > 0 && (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-                    <p className="font-semibold mb-1">⚠ Missing conditional field{missingTargets.length > 1 ? 's' : ''} in campaign</p>
-                    <p>
-                      The following field{missingTargets.length > 1 ? 's are' : ' is'} referenced by conditional rules but
-                      {' '}not added to this campaign in Campaign Builder:{' '}
-                      {missingTargets.map((k) => <code key={k} className="bg-amber-100 px-1 rounded mx-0.5">{k}</code>)}
-                    </p>
-                    <p className="mt-1 text-amber-700">Go to Campaign Builder → Step 3 and add the missing field(s).</p>
-                  </div>
-                )}
-                {buildRows(visibleFields).map((row, rowIdx) =>
-                  row.length === 2 ? (
-                    <div key={rowIdx} className="grid grid-cols-2 gap-4">
-                      {row.map((cf) => <div key={cf.field._id}>{renderField(cf)}</div>)}
-                    </div>
-                  ) : (
-                    <div key={rowIdx}>{renderField(row[0])}</div>
-                  )
-                )}
-              </CardContent>
-            </Card>
+        </div>
+      )}
+    </div>
+  );
+}
 
-            <div className="mt-5 flex justify-end">
-              <Button type="submit" loading={submitMutation.isPending} size="lg"
-                className="px-10 bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20">
-                Submit Lead
-              </Button>
+// ── Repost dropdown — available to ALL roles ───────────────────────────────────
+function RepostMenu({ submissionId, currentCampaignId, campaigns, isLoading, onRepost }: {
+  submissionId: string;
+  currentCampaignId: string;
+  campaigns: Campaign[];
+  isLoading: boolean;
+  onRepost: (campaignId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  if (campaigns.length === 0) return null;
+
+  return (
+    <div className="relative">
+      <Button variant="outline" size="sm" onClick={() => setOpen((o) => !o)}
+        disabled={isLoading} className="text-xs h-7">
+        {isLoading
+          ? <Loader2 className="h-3 w-3 animate-spin" />
+          : <RefreshCw className="h-3 w-3 mr-1" />}
+        Repost
+      </Button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => setOpen(false)} />
+          <div className="absolute right-0 top-full mt-1 z-20 w-52 bg-white border border-slate-200 rounded-xl shadow-xl overflow-hidden">
+            <p className="text-xs text-slate-400 px-3 py-2 border-b bg-slate-50">Send to campaign:</p>
+            <div className="max-h-52 overflow-y-auto">
+              {campaigns.map((c) => (
+                <button key={c._id}
+                  className={`w-full text-left px-3 py-2 text-sm hover:bg-blue-50 hover:text-blue-700 transition-colors truncate flex items-center justify-between
+                    ${c._id === currentCampaignId ? 'bg-blue-50/50' : ''}`}
+                  onClick={() => { onRepost(c._id); setOpen(false); }}>
+                  <span className="truncate">{c.name}</span>
+                  {c._id === currentCampaignId && (
+                    <span className="text-xs text-blue-400 ml-2 flex-shrink-0">current</span>
+                  )}
+                </button>
+              ))}
             </div>
-          </form>
-        ) : selectedCampaignId && !loadingCampaign ? (
-          <Card>
-            <CardContent className="py-10 text-center text-sm text-muted-foreground">
-              No visible fields for this campaign.
-            </CardContent>
-          </Card>
-        ) : null
+          </div>
+        </>
       )}
     </div>
   );

@@ -4,12 +4,12 @@ import type {
   PaginatedResponse, ApiResponse,
 } from '@/types';
 
-// --- AUTH ---
+// ── Auth ───────────────────────────────────────────────────────────────────────
 export const authService = {
   login: (email: string, password: string) =>
     api.post<ApiResponse<AuthTokens>>('/auth/login', { email, password }),
 
-  register: (data: { name: string; email: string; password: string; role?: string; publisher?: string }) =>
+  register: (data: { name: string; email: string; password: string; publisherName?: string }) =>
     api.post<ApiResponse<AuthTokens>>('/auth/register', data),
 
   logout: () => api.post('/auth/logout'),
@@ -19,7 +19,7 @@ export const authService = {
   refresh: () => api.post<ApiResponse<AuthTokens>>('/auth/refresh'),
 };
 
-// --- PUBLISHERS ---
+// ── Publishers ─────────────────────────────────────────────────────────────────
 export const publisherService = {
   getAll: (params?: Record<string, unknown>) =>
     api.get<PaginatedResponse<Publisher>>('/publishers', { params }),
@@ -33,16 +33,21 @@ export const publisherService = {
   update: (id: string, data: Partial<Publisher>) =>
     api.patch<ApiResponse<{ publisher: Publisher }>>(`/publishers/${id}`, data),
 
+  // Pause / unpause — does NOT delete
+  toggleActive: (id: string) =>
+    api.patch<ApiResponse<{ publisher: Publisher; isActive: boolean }>>(`/publishers/${id}/toggle`),
+
   rotateApiKey: (id: string) =>
     api.post<ApiResponse<{ publisher: Publisher }>>(`/publishers/${id}/rotate-key`),
 
   updateIpWhitelist: (id: string, ipWhitelist: string[]) =>
     api.patch<ApiResponse<{ publisher: Publisher }>>(`/publishers/${id}/ip-whitelist`, { ipWhitelist }),
 
+  // Permanent delete — super_admin only
   delete: (id: string) => api.delete(`/publishers/${id}`),
 };
 
-// --- CAMPAIGNS ---
+// ── Campaigns ──────────────────────────────────────────────────────────────────
 export const campaignService = {
   getAll: (params?: Record<string, unknown>) =>
     api.get<PaginatedResponse<Campaign>>('/campaigns', { params }),
@@ -56,13 +61,20 @@ export const campaignService = {
   update: (id: string, data: Partial<Campaign>) =>
     api.patch<ApiResponse<{ campaign: Campaign }>>(`/campaigns/${id}`, data),
 
+  // Pause / unpause — does NOT delete
+  toggleActive: (id: string) =>
+    api.patch<ApiResponse<{ campaign: Campaign; isActive: boolean }>>(`/campaigns/${id}/toggle`),
+
+  // Permanent delete — super_admin only
   delete: (id: string) => api.delete(`/campaigns/${id}`),
 
   getEnrichUrl: (id: string) =>
-    api.get<ApiResponse<{ enrichUrl: string; publisherId: string; campaignId: string }>>(`/campaigns/${id}/enrich-url`),
+    api.get<ApiResponse<{ enrichUrl: string; publisherId: string; campaignId: string }>>(
+      `/campaigns/${id}/enrich-url`
+    ),
 };
 
-// --- FIELDS ---
+// ── Fields ─────────────────────────────────────────────────────────────────────
 export const fieldService = {
   getAll: (params?: Record<string, unknown>) =>
     api.get<PaginatedResponse<Field>>('/fields', { params }),
@@ -79,7 +91,7 @@ export const fieldService = {
   delete: (id: string) => api.delete(`/fields/${id}`),
 };
 
-// --- SUBMISSIONS ---
+// ── Submissions ────────────────────────────────────────────────────────────────
 export const submissionService = {
   getAll: (params?: Record<string, unknown>) =>
     api.get<PaginatedResponse<Submission>>('/submissions', { params }),
@@ -88,16 +100,34 @@ export const submissionService = {
     api.get<ApiResponse<{ submission: Submission }>>(`/submissions/${id}`),
 
   submit: (campaignId: string, data: Record<string, unknown>) =>
-    api.post<ApiResponse<{ submissionId: string; status: string }>>('/submissions', { campaignId, data }),
+    api.post<ApiResponse<{ submissionId: string; status: string }>>(
+      '/submissions',
+      { campaignId, data }
+    ),
 
   repost: (id: string, targetCampaignId: string) =>
-    api.post<ApiResponse<{ submissionId: string; status: string }>>(`/submissions/${id}/repost`, { targetCampaignId }),
+    api.post<ApiResponse<{ submissionId: string; status: string }>>(
+      `/submissions/${id}/repost`,
+      { targetCampaignId }
+    ),
+
+  // Super_admin only — deletes ALL submission records (fresh start)
+  reset: () =>
+    api.delete<ApiResponse<{ message: string }>>(
+      '/submissions/reset',
+      { data: { confirm: 'RESET_ALL_SUBMISSIONS' } }
+    ),
 
   getStats: (params?: Record<string, unknown>) =>
-    api.get<ApiResponse<{ totals: number; bySource: unknown[]; byStatus: unknown[]; byCampaign: unknown[] }>>('/submissions/stats', { params }),
+    api.get<ApiResponse<{
+      totals:     number;
+      bySource:   unknown[];
+      byStatus:   unknown[];
+      byCampaign: unknown[];
+    }>>('/submissions/stats', { params }),
 };
 
-// --- USERS ---
+// ── Users ──────────────────────────────────────────────────────────────────────
 export const userService = {
   getAll: (params?: Record<string, unknown>) =>
     api.get<PaginatedResponse<User>>('/users', { params }),
@@ -111,11 +141,15 @@ export const userService = {
   update: (id: string, data: Partial<User>) =>
     api.patch<ApiResponse<{ user: User }>>(`/users/${id}`, data),
 
+  // Pause / unpause — does NOT delete
   toggleActive: (id: string) =>
     api.patch<ApiResponse<{ user: User; isActive: boolean }>>(`/users/${id}/toggle-active`),
+
+  // Permanent delete — super_admin only
+  delete: (id: string) => api.delete(`/users/${id}`),
 };
 
-// --- AUDIT LOGS ---
+// ── Audit logs ─────────────────────────────────────────────────────────────────
 export const auditService = {
   getAll: (params?: Record<string, unknown>) =>
     api.get('/audit', { params }),
