@@ -69,7 +69,9 @@ userRouter.get(   '/',                   userCtrl.getAll);
 userRouter.post(  '/',                   userCtrl.create);
 userRouter.get(   '/:id',               userCtrl.getOne);
 userRouter.patch( '/:id',               userCtrl.update);
-userRouter.patch( '/:id/toggle-active', userCtrl.toggleActive);                        
+userRouter.patch( '/:id/toggle-active', userCtrl.toggleActive);
+userRouter.patch( '/:id/approve',       restrictTo(ROLES.SUPER_ADMIN), userCtrl.approve);
+userRouter.patch( '/:id/reject',        restrictTo(ROLES.SUPER_ADMIN), userCtrl.reject);
 userRouter.delete('/:id',               restrictTo(ROLES.SUPER_ADMIN), userCtrl.delete);
 
 // ── Audit logs — SUPER_ADMIN ONLY ─────────────────────────────────────────────

@@ -1,7 +1,7 @@
 'use strict';
 
 const User       = require('../models/User');
-const { ROLES }  = require('../models/User');
+const { ROLES, APPROVAL_STATUS } = require('../models/User');
 const { sendSuccess, sendPaginated } = require('../utils/response');
 const AppError   = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
@@ -20,8 +20,9 @@ exports.getAll = catchAsync(async (req, res) => {
     filter.publisher = req.query.publisher;
   }
 
-  if (req.query.role)   filter.role = req.query.role;
-  if (req.query.search) filter.name = { $regex: req.query.search, $options: 'i' };
+  if (req.query.role)           filter.role = req.query.role;
+  if (req.query.approvalStatus) filter.approvalStatus = req.query.approvalStatus;
+  if (req.query.search)         filter.name = { $regex: req.query.search, $options: 'i' };
 
   const [users, total] = await Promise.all([
     User.find(filter).populate('publisher', 'name').sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -110,6 +111,42 @@ exports.toggleActive = catchAsync(async (req, res, next) => {
   });
 
   sendSuccess(res, { user, isActive: user.isActive });
+});
+
+// PATCH /users/:id/approve  — super_admin approves a pending signup (activates it)
+exports.approve = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.params.id);
+  if (!user) return next(new AppError('User not found.', 404));
+
+  user.approvalStatus = APPROVAL_STATUS.APPROVED;
+  user.isActive       = true;
+  user.approvedBy     = req.user._id;
+  user.approvedAt     = new Date();
+  await user.save({ validateBeforeSave: false });
+
+  await audit({
+    user: req.user, publisher: user.publisher,
+    action: 'APPROVE_USER', resource: 'User', resourceId: user._id, req,
+  });
+
+  sendSuccess(res, { user, approvalStatus: user.approvalStatus });
+});
+
+// PATCH /users/:id/reject  — super_admin rejects a pending signup
+exports.reject = catchAsync(async (req, res, next) => {
+  const user = await User.findById(req.params.id);
+  if (!user) return next(new AppError('User not found.', 404));
+
+  user.approvalStatus = APPROVAL_STATUS.REJECTED;
+  user.isActive       = false;
+  await user.save({ validateBeforeSave: false });
+
+  await audit({
+    user: req.user, publisher: user.publisher,
+    action: 'REJECT_USER', resource: 'User', resourceId: user._id, req,
+  });
+
+  sendSuccess(res, { user, approvalStatus: user.approvalStatus });
 });
 
 // DELETE /users/:id  — hard delete, super_admin only
