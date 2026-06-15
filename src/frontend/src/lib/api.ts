@@ -26,7 +26,12 @@ api.interceptors.response.use(
   async (error) => {
     const original = error.config;
 
-    if (error.response?.status === 401 && !original._retry) {
+    // Never attempt a token refresh for auth endpoints. A failed login/register
+    // legitimately returns 401/403 — we must surface that message, not redirect.
+    const url = original?.url || '';
+    const isAuthEndpoint = url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/refresh');
+
+    if (error.response?.status === 401 && !original._retry && !isAuthEndpoint) {
       if (isRefreshing) {
         return new Promise((resolve, reject) => {
           failedQueue.push({ resolve, reject });

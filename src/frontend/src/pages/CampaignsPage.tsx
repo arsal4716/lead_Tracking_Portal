@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/index';
 import { Badge } from '@/components/ui/index';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/index';
-import { copyToClipboard, formatDate } from '@/lib/utils';
+import { copyToClipboard, formatDate, providerLabel, providerBadgeColor } from '@/lib/utils';
 import {
   Plus, Copy, Check, Search, ExternalLink,
   ToggleLeft, ToggleRight, Loader2, Link2,
@@ -53,8 +53,9 @@ export default function CampaignsPage() {
   const isSuperAdmin = user?.role === 'super_admin';
   const canManage = isSuperAdmin || user?.role === 'admin';
 
-  const API_BASE =
-    'http://91.108.112.198:7001';
+  // Production domain only — NEVER an internal IP. Prefer the backend-provided
+  // enrichUrl (already built on PUBLIC_BASE_URL); fall back to the prod domain.
+  const PUBLIC_BASE = 'https://hlgleadtrack.com';
 
   const normalizeBase = (url: string) => url.replace(/\/$/, '');
 
@@ -64,7 +65,9 @@ export default function CampaignsPage() {
         ? (campaign.publisher as any)._id
         : campaign.publisher;
 
-    const base = `${normalizeBase(API_BASE)}/api/v1/public/enrich/${publisherId}/${campaign._id}`;
+    const base = campaign.enrichUrl
+      ? normalizeBase(campaign.enrichUrl)
+      : `${PUBLIC_BASE}/api/v1/public/enrich/${publisherId}/${campaign._id}`;
 
     if (!campaign.fields?.length) return base;
 
@@ -157,6 +160,7 @@ export default function CampaignsPage() {
                   <tr className="border-b bg-muted/40">
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Campaign</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Publisher</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Provider</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Ringba ID</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Fields</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Validation</th>
@@ -174,12 +178,18 @@ export default function CampaignsPage() {
                         <p className="text-xs text-muted-foreground">{formatDate(campaign.createdAt)}</p>
                       </td>
 
-                      <td className="px-4 py-3 text-sm text-muted-foreground">
-                        {campaign.publisher && typeof campaign.publisher === 'object' ? campaign.publisher.name : '—'}
+                      <td className="px-4 py-3 text-sm">
+                        {campaign.publisher && typeof campaign.publisher === 'object'
+                          ? <span className="font-medium text-slate-700">{campaign.publisher.name}</span>
+                          : <span className="text-muted-foreground">—</span>}
                       </td>
 
                       <td className="px-4 py-3">
-                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{campaign.ringbaId}</code>
+                        <Badge className={providerBadgeColor(campaign.destination)}>{providerLabel(campaign.destination)}</Badge>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{campaign.ringbaId || '—'}</code>
                       </td>
 
                       <td className="px-4 py-3 text-muted-foreground">
