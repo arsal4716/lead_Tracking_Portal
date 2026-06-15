@@ -69,7 +69,9 @@ userRouter.get(   '/',                   userCtrl.getAll);
 userRouter.post(  '/',                   userCtrl.create);
 userRouter.get(   '/:id',               userCtrl.getOne);
 userRouter.patch( '/:id',               userCtrl.update);
-userRouter.patch( '/:id/toggle-active', userCtrl.toggleActive);                        
+userRouter.patch( '/:id/toggle-active', userCtrl.toggleActive);
+userRouter.patch( '/:id/approve',       restrictTo(ROLES.SUPER_ADMIN), userCtrl.approve);
+userRouter.patch( '/:id/reject',        restrictTo(ROLES.SUPER_ADMIN), userCtrl.reject);
 userRouter.delete('/:id',               restrictTo(ROLES.SUPER_ADMIN), userCtrl.delete);
 
 // ── Audit logs — SUPER_ADMIN ONLY ─────────────────────────────────────────────
@@ -96,6 +98,13 @@ auditRouter.get('/', catchAsync(async (req, res) => {
   sendPaginated(res, logs, total, page, limit);
 }));
 
+// ── Calls (tracking) ─────────────────────────────────────────────────────────
+const callRouter = require('express').Router();
+const callCtrl   = require('../controllers/call.controller');
+callRouter.use(protect, tenantIsolation);
+callRouter.get('/stats', callCtrl.getStats);
+callRouter.get('/',      callCtrl.getAll);
+
 // ── Public (no auth) ───────────────────────────────────────────────────────────
 const publicRouter = require('express').Router();
 const { apiKeyAuth } = require('../middleware/auth');
@@ -103,6 +112,9 @@ const publicCtrl     = require('../controllers/public.controller');
 publicRouter.post('/lead-ingest',                     apiKeyAuth, validate(schemas.ingestLead), publicCtrl.ingestLead);
 publicRouter.get( '/enrich/:publisherId/:campaignId', publicCtrl.enrichEndpoint);
 publicRouter.post('/enrich/:publisherId/:campaignId', publicCtrl.enrichEndpoint);
+// Call-tracking pixel — accepts both GET (pixel/macro) and POST
+publicRouter.get( '/call', callCtrl.ingestCall);
+publicRouter.post('/call', callCtrl.ingestCall);
 
 // ── Mount all routers ──────────────────────────────────────────────────────────
 router.use('/auth',        authRouter);
@@ -110,6 +122,7 @@ router.use('/publishers',  publisherRouter);
 router.use('/campaigns',   campaignRouter);
 router.use('/fields',      fieldRouter);
 router.use('/submissions', submissionRouter);
+router.use('/calls',       callRouter);
 router.use('/users',       userRouter);
 router.use('/audit',       auditRouter);
 router.use('/public',      publicRouter);

@@ -54,11 +54,16 @@ export default function SubmissionsPage() {
     campaign:  '',
     source:    '',
     status:    '',
+    fraud:     '',
     from:      '',
     to:        '',
   });
 
+  const PAGE_SIZE = 20;
+
   // ── Queries ──────────────────────────────────────────────────────────────────
+  // Instant search: query key includes filters so each keystroke refetches.
+  // Real-time: poll every 15s.
   const { data, isLoading, isFetching } = useQuery({
     queryKey: ['submissions', filters, page],
     queryFn: () => submissionService.getAll({
@@ -67,11 +72,14 @@ export default function SubmissionsPage() {
       campaign:  filters.campaign  || undefined,
       source:    filters.source    || undefined,
       status:    filters.status    || undefined,
+      fraud:     filters.fraud     || undefined,
       from:      filters.from      || undefined,
       to:        filters.to        || undefined,
       page,
-      limit: 20,
+      limit: PAGE_SIZE,
     }),
+    refetchInterval: 15000,
+    placeholderData: (prev) => prev,
   });
 
   // Campaigns — scoped to selected publisher for super_admin
@@ -140,8 +148,9 @@ export default function SubmissionsPage() {
   };
 
   // ── Table col count for expandedRow colSpan ───────────────────────────────────
-  // Phone | Campaign | Publisher? | Agent? | Source | J | TF | Status | Date | Time | Actions
-  const colCount = 7 + (isSuperAdmin ? 2 : isAdmin ? 1 : 0) + 1; // +1 for actions
+  // # | Phone | Campaign | Publisher? | Agent? | Source | J | TF | Status | Date | Time | Actions
+  const baseCols = 10; // # Phone Campaign Source J TF Status Date Time Actions
+  const colCount = baseCols + (isSuperAdmin ? 2 : isAdmin ? 1 : 0);
 
   return (
     <div className="page-container space-y-5">
@@ -206,7 +215,7 @@ export default function SubmissionsPage() {
       {/* Filters */}
       <Card>
         <CardContent className="p-4">
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-7 gap-2.5">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-8 gap-2.5">
 
             {/* Phone search */}
             <div className="relative col-span-2 sm:col-span-1">
@@ -261,6 +270,16 @@ export default function SubmissionsPage() {
               </SelectContent>
             </Select>
 
+            {/* Fraud (call before lead) */}
+            <Select value={filters.fraud || 'all'} onValueChange={(v) => setFilter('fraud', v)}>
+              <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="All leads" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All leads</SelectItem>
+                <SelectItem value="true">Fraud only</SelectItem>
+                <SelectItem value="false">Clean only</SelectItem>
+              </SelectContent>
+            </Select>
+
             {/* Date range */}
             <Input type="date" className="h-8 text-xs" value={filters.from}
               onChange={(e) => setFilter('from', e.target.value)} />
@@ -287,6 +306,7 @@ export default function SubmissionsPage() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b bg-slate-50">
+                    <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">#</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Phone</th>
                     <th className="text-left px-4 py-3 text-xs font-semibold text-slate-500 uppercase">Campaign</th>
                     {isSuperAdmin && (
@@ -305,24 +325,32 @@ export default function SubmissionsPage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {submissions.map((sub) => {
+                  {submissions.map((sub, i) => {
                     const est = formatEST(sub.createdAt);
+                    const rowIndex = (page - 1) * PAGE_SIZE + i; // newest starts at 0
+                    const isFraud = !!sub.callBeforeLead;
                     return (
                       <>
                         <tr
                           key={sub._id}
-                          className="hover:bg-slate-50/80 transition-colors cursor-pointer"
+                          className={`transition-colors cursor-pointer ${isFraud ? 'bg-red-50 hover:bg-red-100/70' : 'hover:bg-slate-50/80'}`}
                           onClick={() => setExpandedId(expandedId === sub._id ? null : sub._id)}
                         >
+                          {/* Index — newest = 0 */}
+                          <td className="px-4 py-3 text-xs font-mono text-slate-400">{rowIndex}</td>
+
                           {/* Phone */}
                           <td className="px-4 py-3">
                             <div className="flex items-center gap-2">
                               {expandedId === sub._id
                                 ? <ChevronUp   className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />
                                 : <ChevronDown className="h-3.5 w-3.5 text-slate-400 flex-shrink-0" />}
-                              <code className="text-xs font-mono text-slate-700">{sub.phone ||  '—'}</code>
+                              <code className={`text-xs font-mono ${isFraud ? 'text-red-700 font-semibold' : 'text-slate-700'}`}>{sub.phone ||  '—'}</code>
+                              {isFraud && (
+                                <span className="text-xs bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-semibold">FRAUD</span>
+                              )}
                               {sub.isDuplicate && (
-                                <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">DUP</span>
+                                <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium">DUP{sub.attemptCount ? ` ${sub.attemptCount}` : ''}</span>
                               )}
                             </div>
                           </td>
@@ -428,6 +456,59 @@ export default function SubmissionsPage() {
                                     <div key={dest}
                                       className={`text-xs px-2.5 py-1.5 rounded-full font-medium ${result.sent ? 'bg-emerald-100 text-emerald-700' : 'bg-red-100 text-red-700'}`}>
                                       {dest}: {result.sent ? '✓ sent' : `✗ ${result.error || 'failed'}`}
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Super-admin enrichment mapping — final URL + request payload + response.
+                                  NO masking for super_admin. Hidden from agents/admins. */}
+                              {isSuperAdmin && (sub as any).destinationResults &&
+                               Object.keys((sub as any).destinationResults).length > 0 && (
+                                <div className="space-y-3 mt-3 border-t border-slate-200 pt-3">
+                                  <p className="text-xs font-semibold text-slate-500 uppercase">Enrichment mapping (super admin)</p>
+                                  {Object.entries((sub as any).destinationResults).map(([dest, result]: [string, any]) => (
+                                    <div key={dest} className="rounded-lg border border-slate-200 bg-white p-3 space-y-2">
+                                      <div className="flex items-center justify-between">
+                                        <span className="text-xs font-semibold text-slate-700">{result.request?.provider || dest}</span>
+                                        <span className={`text-xs font-medium ${result.sent ? 'text-emerald-600' : 'text-red-600'}`}>
+                                          {result.sent ? 'sent' : (result.error || 'failed')}
+                                        </span>
+                                      </div>
+
+                                      {result.request?.uniqueKey && (
+                                        <p className="text-xs text-slate-500">unique_key: <code className="text-slate-700">{result.request.uniqueKey}</code></p>
+                                      )}
+
+                                      {result.request?.fullUrl && (
+                                        <div>
+                                          <p className="text-xs text-slate-400 mb-0.5">Final API URL</p>
+                                          <code className="block text-xs font-mono text-slate-700 break-all bg-slate-50 rounded p-2">{result.request.fullUrl}</code>
+                                        </div>
+                                      )}
+
+                                      {result.request?.params && Object.keys(result.request.params).length > 0 && (
+                                        <div>
+                                          <p className="text-xs text-slate-400 mb-1">Request payload (field → value)</p>
+                                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                                            {Object.entries(result.request.params).map(([k, v]) => (
+                                              <div key={k} className="bg-slate-50 rounded px-2 py-1 border border-slate-100">
+                                                <span className="text-[11px] text-slate-400">{k}</span>
+                                                <div className="text-xs font-medium text-slate-700 truncate">{String(v ?? '—')}</div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      )}
+
+                                      {result.response !== undefined && result.response !== null && (
+                                        <div>
+                                          <p className="text-xs text-slate-400 mb-0.5">Vendor response</p>
+                                          <pre className="text-[11px] font-mono text-slate-600 bg-slate-50 rounded p-2 overflow-x-auto max-h-40">{
+                                            typeof result.response === 'string' ? result.response : JSON.stringify(result.response, null, 2)
+                                          }</pre>
+                                        </div>
+                                      )}
                                     </div>
                                   ))}
                                 </div>

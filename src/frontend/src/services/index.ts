@@ -1,7 +1,7 @@
 import api from '@/lib/api';
 import type {
-  AuthTokens, Campaign, Field, Publisher, Submission, User,
-  PaginatedResponse, ApiResponse,
+  AuthTokens, Campaign, Field, Publisher, Submission, User, Call,
+  CallStats, SubmissionStats, PaginatedResponse, ApiResponse,
 } from '@/types';
 
 // ── Auth ───────────────────────────────────────────────────────────────────────
@@ -9,8 +9,8 @@ export const authService = {
   login: (email: string, password: string) =>
     api.post<ApiResponse<AuthTokens>>('/auth/login', { email, password }),
 
-  register: (data: { name: string; email: string; password: string; publisherName?: string }) =>
-    api.post<ApiResponse<AuthTokens>>('/auth/register', data),
+  register: (data: { name: string; email: string; password: string; publisherName: string }) =>
+    api.post<ApiResponse<{ message: string; pendingApproval: boolean }>>('/auth/register', data),
 
   logout: () => api.post('/auth/logout'),
 
@@ -119,12 +119,16 @@ export const submissionService = {
     ),
 
   getStats: (params?: Record<string, unknown>) =>
-    api.get<ApiResponse<{
-      totals:     number;
-      bySource:   unknown[];
-      byStatus:   unknown[];
-      byCampaign: unknown[];
-    }>>('/submissions/stats', { params }),
+    api.get<ApiResponse<SubmissionStats>>('/submissions/stats', { params }),
+};
+
+// ── Calls (tracking + fraud) ─────────────────────────────────────────────────
+export const callService = {
+  getAll: (params?: Record<string, unknown>) =>
+    api.get<PaginatedResponse<Call>>('/calls', { params }),
+
+  getStats: (params?: Record<string, unknown>) =>
+    api.get<ApiResponse<CallStats>>('/calls/stats', { params }),
 };
 
 // ── Users ──────────────────────────────────────────────────────────────────────
@@ -144,6 +148,12 @@ export const userService = {
   // Pause / unpause — does NOT delete
   toggleActive: (id: string) =>
     api.patch<ApiResponse<{ user: User; isActive: boolean }>>(`/users/${id}/toggle-active`),
+
+  // Approve / reject pending self-registrations — super_admin only
+  approve: (id: string) =>
+    api.patch<ApiResponse<{ user: User; approvalStatus: string }>>(`/users/${id}/approve`),
+  reject: (id: string) =>
+    api.patch<ApiResponse<{ user: User; approvalStatus: string }>>(`/users/${id}/reject`),
 
   // Permanent delete — super_admin only
   delete: (id: string) => api.delete(`/users/${id}`),

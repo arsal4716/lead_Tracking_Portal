@@ -28,6 +28,36 @@ const parseApiUrl = (rawUrl) => {
   }
 };
 
+// ── Build the exact final URL that gets sent (for logging / super-admin view) ───
+const buildFullUrl = (base, params) => {
+  if (!base) return null;
+  try {
+    const u = new URL(base);
+    Object.entries(params || {}).forEach(([k, v]) => u.searchParams.set(k, String(v)));
+    return u.toString();
+  } catch {
+    const qs = new URLSearchParams(
+      Object.fromEntries(Object.entries(params || {}).map(([k, v]) => [k, String(v)]))
+    ).toString();
+    return qs ? `${base}?${qs}` : base;
+  }
+};
+
+// ── Extract the CallGrid unique key from a pasted URL ───────────────────────────
+// e.g. https://bid.callgrid.com/api/bid/cmp5yu7uu04qi07js0iz5mtml?... → cmp5yu...
+const extractCallgridKey = (rawUrl) => {
+  if (!rawUrl) return null;
+  try {
+    const u = new URL(rawUrl.trim());
+    const parts = u.pathname.split('/').filter(Boolean);
+    return parts[parts.length - 1] || null;
+  } catch {
+    const noQuery = String(rawUrl).split('?')[0];
+    const parts = noQuery.split('/').filter(Boolean);
+    return parts[parts.length - 1] || null;
+  }
+};
+
 // ── Build params for a specific destination ────────────────────────────────────
 // dest: 'ringba' | 'rtb' | 'callgrid'
 // For each campaign field:
@@ -89,14 +119,16 @@ const sendToRingba = async (ringbaId, params) => {
     ? ringbaId
     : `https://display.ringba.com/enrich/${ringbaId}`;
 
+  const request = { provider: 'ringba_regular', url, params, fullUrl: buildFullUrl(url, params) };
+
   try {
-    console.log('[Ringba Regular] →', url, params);
+    console.log('[Ringba Regular] →', request.fullUrl);
     const response = await axios.get(url, { params, timeout: 10000 });
     console.log('[Ringba Regular] ←', response.data);
-    return { sent: true, sentAt: new Date(), response: response.data, error: null };
+    return { sent: true, sentAt: new Date(), provider: 'ringba_regular', request, response: response.data, error: null };
   } catch (err) {
     console.error('[Ringba Regular] ERROR', err.response?.status, JSON.stringify(err.response?.data));
-    return { sent: false, sentAt: new Date(), response: err.response?.data || null, error: err.message };
+    return { sent: false, sentAt: new Date(), provider: 'ringba_regular', request, response: err.response?.data || null, error: err.message };
   }
 };
 
@@ -106,20 +138,21 @@ const sendToRingba = async (ringbaId, params) => {
 // Params from the pasted URL are static defaults; campaign field mapping overrides them.
 const sendToRingbaRtb = async (campaign, submissionData, agentName) => {
   const rawUrl = campaign.ringbaRtbUrl;
-  if (!rawUrl) return { sent: false, sentAt: new Date(), response: null, error: 'Ringba RTB URL not configured' };
+  if (!rawUrl) return { sent: false, sentAt: new Date(), provider: 'ringba_rtb', request: null, response: null, error: 'Ringba RTB URL not configured' };
+
+  const { base, staticParams } = parseApiUrl(rawUrl);
+  const fieldParams  = buildParams(campaign, submissionData, 'rtb', agentName);
+  const finalParams  = { ...staticParams, ...fieldParams };
+  const request = { provider: 'ringba_rtb', url: base, params: finalParams, fullUrl: buildFullUrl(base, finalParams) };
 
   try {
-    const { base, staticParams } = parseApiUrl(rawUrl);
-    const fieldParams  = buildParams(campaign, submissionData, 'rtb', agentName);
-    const finalParams  = { ...staticParams, ...fieldParams };
-
-    console.log('[Ringba RTB] →', base, finalParams);
+    console.log('[Ringba RTB] →', request.fullUrl);
     const response = await axios.get(base, { params: finalParams, timeout: 10000 });
     console.log('[Ringba RTB] ←', response.data);
-    return { sent: true, sentAt: new Date(), response: response.data, error: null };
+    return { sent: true, sentAt: new Date(), provider: 'ringba_rtb', request, response: response.data, error: null };
   } catch (err) {
     console.error('[Ringba RTB] ERROR', err.response?.data || err.message);
-    return { sent: false, sentAt: new Date(), response: err.response?.data || null, error: err.message };
+    return { sent: false, sentAt: new Date(), provider: 'ringba_rtb', request, response: err.response?.data || null, error: err.message };
   }
 };
 
@@ -129,20 +162,27 @@ const sendToRingbaRtb = async (campaign, submissionData, agentName) => {
 // All campaign fields map via their per-destination callgrid param key override.
 const sendToCallGrid = async (campaign, submissionData, agentName) => {
   const rawUrl = campaign.callgridUrl;
-  if (!rawUrl) return { sent: false, sentAt: new Date(), response: null, error: 'CallGrid URL not configured' };
+  if (!rawUrl) return { sent: false, sentAt: new Date(), provider: 'callgrid', request: null, response: null, error: 'CallGrid URL not configured' };
+
+  const { base, staticParams } = parseApiUrl(rawUrl);
+  const fieldParams  = buildParams(campaign, submissionData, 'callgrid', agentName);
+  const finalParams  = { ...staticParams, ...fieldParams };
+  const request = {
+    provider:   'callgrid',
+    url:        base,
+    uniqueKey:  extractCallgridKey(rawUrl),
+    params:     finalParams,
+    fullUrl:    buildFullUrl(base, finalParams),
+  };
 
   try {
-    const { base, staticParams } = parseApiUrl(rawUrl);
-    const fieldParams  = buildParams(campaign, submissionData, 'callgrid', agentName);
-    const finalParams  = { ...staticParams, ...fieldParams };
-
-    console.log('[CallGrid] →', base, finalParams);
+    console.log('[CallGrid] →', request.fullUrl);
     const response = await axios.get(base, { params: finalParams, timeout: 10000 });
     console.log('[CallGrid] ←', response.data);
-    return { sent: true, sentAt: new Date(), response: response.data, error: null };
+    return { sent: true, sentAt: new Date(), provider: 'callgrid', request, response: response.data, error: null };
   } catch (err) {
     console.error('[CallGrid] ERROR', err.response?.data || err.message);
-    return { sent: false, sentAt: new Date(), response: err.response?.data || null, error: err.message };
+    return { sent: false, sentAt: new Date(), provider: 'callgrid', request, response: err.response?.data || null, error: err.message };
   }
 };
 
@@ -172,4 +212,4 @@ const sendToDestinations = async (campaign, submissionData, agentName) => {
   return { sent, results };
 };
 
-module.exports = { sendToRingba, sendToRingbaRtb, sendToCallGrid, sendToDestinations, buildParams, cleanPhone, parseApiUrl };
+module.exports = { sendToRingba, sendToRingbaRtb, sendToCallGrid, sendToDestinations, buildParams, cleanPhone, parseApiUrl, buildFullUrl, extractCallgridKey };

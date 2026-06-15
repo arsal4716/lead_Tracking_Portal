@@ -49,7 +49,21 @@ exports.getAll = catchAsync(async (req, res) => {
   if (req.query.campaign) filter.campaign = req.query.campaign;
   if (req.query.source)   filter.source   = req.query.source;
   if (req.query.status)   filter.status   = req.query.status;
-  if (req.query.phone)    filter.phone     = { $regex: req.query.phone, $options: 'i' };
+  if (req.query.fraud === 'true')  filter.callBeforeLead = true;
+  if (req.query.fraud === 'false') filter.callBeforeLead = { $ne: true };
+
+  // Phone search — format-agnostic. Normalises the query to digits and matches
+  // the normalised column; falls back to the raw column for legacy records.
+  if (req.query.phone) {
+    const digits = String(req.query.phone).replace(/\D/g, '');
+    const last10 = digits.length > 10 ? digits.slice(-10) : digits;
+    if (last10) {
+      filter.$or = [
+        { phoneNormalized: { $regex: last10, $options: 'i' } },
+        { phone:           { $regex: digits, $options: 'i' } },
+      ];
+    }
+  }
 
   // Date range filtering (from/to are EST date strings — store as UTC)
   if (req.query.from || req.query.to) {
@@ -122,8 +136,24 @@ exports.getStats = catchAsync(async (req, res) => {
     matchStage.publisher = require('mongoose').Types.ObjectId.createFromHexString(req.query.publisher);
   }
 
-  const [totals, bySource, byStatus, byCampaign] = await Promise.all([
+  if (req.query.campaign) {
+    matchStage.campaign = require('mongoose').Types.ObjectId.createFromHexString(req.query.campaign);
+  }
+
+  // Date range — dashboard defaults to "today" but range is honoured when provided.
+  if (req.query.from || req.query.to) {
+    matchStage.createdAt = {};
+    if (req.query.from) matchStage.createdAt.$gte = new Date(req.query.from);
+    if (req.query.to) {
+      const toDate = new Date(req.query.to);
+      toDate.setHours(23, 59, 59, 999);
+      matchStage.createdAt.$lte = toDate;
+    }
+  }
+
+  const [totals, invalidLeads, bySource, byStatus, byCampaign, perPublisher] = await Promise.all([
     Submission.countDocuments(matchStage),
+    Submission.countDocuments({ ...matchStage, callBeforeLead: true }),
     Submission.aggregate([{ $match: matchStage }, { $group: { _id: '$source', count: { $sum: 1 } } }]),
     Submission.aggregate([{ $match: matchStage }, { $group: { _id: '$status', count: { $sum: 1 } } }]),
     Submission.aggregate([
@@ -135,9 +165,31 @@ exports.getStats = catchAsync(async (req, res) => {
       { $unwind: '$campaign' },
       { $project: { campaignName: '$campaign.name', count: 1 } },
     ]),
+    Submission.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id:     '$publisher',
+          total:   { $sum: 1 },
+          invalid: { $sum: { $cond: ['$callBeforeLead', 1, 0] } },
+        },
+      },
+      { $lookup: { from: 'publishers', localField: '_id', foreignField: '_id', as: 'publisher' } },
+      { $unwind: { path: '$publisher', preserveNullAndEmptyArrays: true } },
+      { $project: { publisherName: { $ifNull: ['$publisher.name', 'Unknown'] }, total: 1, invalid: 1, valid: { $subtract: ['$total', '$invalid'] } } },
+      { $sort: { total: -1 } },
+    ]),
   ]);
 
-  sendSuccess(res, { totals, bySource, byStatus, byCampaign });
+  sendSuccess(res, {
+    totals,
+    validLeads:   totals - invalidLeads,
+    invalidLeads, // CALL_BEFORE_LEAD
+    bySource,
+    byStatus,
+    byCampaign,
+    perPublisher,
+  });
 });
 
 // DELETE /submissions/reset  — super_admin only, clears ALL submissions

@@ -9,6 +9,12 @@ const ROLES = {
   AGENT: 'agent',
 };
 
+const APPROVAL_STATUS = {
+  PENDING:  'pending',
+  APPROVED: 'approved',
+  REJECTED: 'rejected',
+};
+
 const userSchema = new mongoose.Schema(
   {
     name: { type: String, required: true, trim: true },
@@ -27,6 +33,18 @@ const userSchema = new mongoose.Schema(
       },
     },
     isActive: { type: Boolean, default: true },
+
+    // Self-registered users start 'pending' and must be approved by a super_admin
+    // before they can log in. Admin-created users and existing accounts are
+    // 'approved' (default) so behaviour is unchanged for them.
+    approvalStatus: {
+      type:    String,
+      enum:    Object.values(APPROVAL_STATUS),
+      default: APPROVAL_STATUS.APPROVED,
+    },
+    approvedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    approvedAt: { type: Date },
+
     refreshToken: { type: String, select: false },
     lastLogin: { type: Date },
     passwordChangedAt: { type: Date },
@@ -58,3 +76,4 @@ userSchema.methods.changedPasswordAfter = function (jwtTimestamp) {
 
 module.exports = mongoose.model('User', userSchema);
 module.exports.ROLES = ROLES;
+module.exports.APPROVAL_STATUS = APPROVAL_STATUS;

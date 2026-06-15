@@ -4,10 +4,12 @@ import { Toaster } from 'sonner';
 import { ProtectedRoute } from '@/components/layout/ProtectedRoute';
 
 import LoginPage from '@/pages/auth/LoginPage';
+import SignupPage from '@/pages/auth/SignupPage';
 import DashboardPage from '@/pages/DashboardPage';
 import CampaignsPage from '@/pages/CampaignsPage';
 import CampaignBuilderPage from '@/pages/CampaignBuilderPage';
 import SubmissionsPage from '@/pages/SubmissionsPage';
+import CallsPage from '@/pages/CallsPage';
 import SubmitLeadPage from '@/pages/SubmitLeadPage';
 import FieldLibraryPage from '@/pages/FieldLibraryPage';
 import PublishersPage from '@/pages/PublishersPage';
@@ -31,6 +33,7 @@ export default function App() {
         <Routes>
           {/* Public */}
           <Route path="/login" element={<LoginPage />} />
+          <Route path="/signup" element={<SignupPage />} />
           <Route path="/" element={<Navigate to="/dashboard" replace />} />
 
           {/* All authenticated users */}
@@ -46,6 +49,7 @@ export default function App() {
 
           {/* Admin + Super Admin */}
           <Route element={<ProtectedRoute roles={['admin', 'super_admin']} />}>
+            <Route path="/calls" element={<CallsPage />} />
             <Route path="/campaigns" element={<CampaignsPage />} />
             <Route path="/campaigns/new" element={<CampaignBuilderPage />} />
             <Route path="/campaigns/:id/edit" element={<CampaignBuilderPage />} />

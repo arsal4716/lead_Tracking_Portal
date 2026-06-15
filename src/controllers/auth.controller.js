@@ -29,15 +29,15 @@ const attachTokens = async (user, res) => {
 
 exports.register = catchAsync(async (req, res, next) => {
   const { name, email, password, publisherName } = req.body;
-  const { ROLES } = require('../models/User');
+  const { ROLES, APPROVAL_STATUS } = require('../models/User');
   const Publisher = require('../models/Publisher');
 
   // SECURITY: role is ALWAYS agent on self-registration, no exceptions.
   // Client cannot supply or override this. Only super_admin can change roles.
   const role = ROLES.AGENT;
 
-  // Resolve publisher by name — case-insensitive exact match against active publishers.
-  // We never expose publisher IDs or names to the client for selection.
+  // Publisher name is typed in manually by the signup form (no dropdown).
+  // Resolve by case-insensitive exact match against active publishers.
   const publisher = await Publisher.findOne({
     name: { $regex: `^${publisherName.trim()}$`, $options: 'i' },
     isActive: true,
@@ -52,8 +52,17 @@ exports.register = catchAsync(async (req, res, next) => {
     );
   }
 
-  const user = await User.create({ name, email, password, role, publisher: publisher._id });
-  const tokens = await attachTokens(user, res);
+  // Self-registered accounts are inactive + pending until a super_admin approves.
+  // No tokens are issued — the user cannot log in yet.
+  const user = await User.create({
+    name,
+    email,
+    password,
+    role,
+    publisher: publisher._id,
+    isActive: false,
+    approvalStatus: APPROVAL_STATUS.PENDING,
+  });
 
   await audit({
     user,
@@ -64,11 +73,14 @@ exports.register = catchAsync(async (req, res, next) => {
     req,
   });
 
-  const userObj = user.toObject();
-  delete userObj.password;
-  delete userObj.refreshToken;
-
-  sendSuccess(res, { user: userObj, ...tokens }, 201);
+  sendSuccess(
+    res,
+    {
+      message: 'Registration received. Your account is pending super admin approval.',
+      pendingApproval: true,
+    },
+    201
+  );
 });
 
 exports.login = catchAsync(async (req, res, next) => {
@@ -76,9 +88,16 @@ exports.login = catchAsync(async (req, res, next) => {
 
   const user = await User.findOne({ email }).select('+password +refreshToken').populate('publisher', 'name _id isActive');
   if (!user || !(await user.comparePassword(password))) {
-    return next(new AppError('Invalid email or password.', 401));
+    return next(new AppError('Invalid credentials.', 401));
   }
 
+  const { APPROVAL_STATUS } = require('../models/User');
+  if (user.approvalStatus === APPROVAL_STATUS.PENDING) {
+    return next(new AppError('Your account is pending super admin approval.', 403));
+  }
+  if (user.approvalStatus === APPROVAL_STATUS.REJECTED) {
+    return next(new AppError('Your account request was rejected. Contact your admin.', 403));
+  }
   if (!user.isActive) return next(new AppError('Account disabled. Contact support.', 403));
   if (user.publisher && !user.publisher.isActive) return next(new AppError('Publisher account disabled.', 403));
 

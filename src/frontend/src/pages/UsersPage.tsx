@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Label, Card, CardContent } from '@/components/ui/index';
 import { Badge } from '@/components/ui/index';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/index';
-import { Plus, Search, Loader2, Users, X, ToggleLeft, ToggleRight } from 'lucide-react';
+import { Plus, Search, Loader2, Users, X, ToggleLeft, ToggleRight, UserCheck, UserX } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import type { User } from '@/types';
 
@@ -23,12 +23,20 @@ export default function UsersPage() {
   const { user: currentUser } = useAuthStore();
   const [search, setSearch] = useState('');
   const [roleFilter, setRoleFilter] = useState('');
+  const [approvalFilter, setApprovalFilter] = useState('');
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
 
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+
   const { data, isLoading } = useQuery({
-    queryKey: ['users', { search, roleFilter, page }],
-    queryFn: () => userService.getAll({ search, role: roleFilter || undefined, page, limit: 20 }),
+    queryKey: ['users', { search, roleFilter, approvalFilter, page }],
+    queryFn: () => userService.getAll({
+      search,
+      role: roleFilter || undefined,
+      approvalStatus: approvalFilter || undefined,
+      page, limit: 20,
+    }),
   });
 
   const { data: publishersData } = useQuery({
@@ -58,6 +66,16 @@ export default function UsersPage() {
       toast.success(res.data.data.isActive ? 'User activated.' : 'User deactivated.');
     },
     onError: () => toast.error('Failed to toggle user.'),
+  });
+
+  const approveMutation = useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'approve' | 'reject' }) =>
+      action === 'approve' ? userService.approve(id) : userService.reject(id),
+    onSuccess: (_res, vars) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      toast.success(vars.action === 'approve' ? 'User approved.' : 'User rejected.');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Action failed.'),
   });
 
   const users: User[] = data?.data?.data || [];
@@ -100,6 +118,19 @@ export default function UsersPage() {
             <SelectItem value="agent">Agent</SelectItem>
           </SelectContent>
         </Select>
+        {isSuperAdmin && (
+          <Select value={approvalFilter || 'all'} onValueChange={(v) => { setApprovalFilter(v === 'all' ? '' : v); setPage(1); }}>
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="All approvals" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All approvals</SelectItem>
+              <SelectItem value="pending">Pending</SelectItem>
+              <SelectItem value="approved">Approved</SelectItem>
+              <SelectItem value="rejected">Rejected</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       <Card>
@@ -122,6 +153,7 @@ export default function UsersPage() {
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Publisher</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Last Login</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Approval</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Actions</th>
                   </tr>
                 </thead>
@@ -161,7 +193,29 @@ export default function UsersPage() {
                         </button>
                       </td>
                       <td className="px-4 py-3">
-                        <Badge variant="outline" className="text-xs">{formatDate(u.createdAt)}</Badge>
+                        {(() => {
+                          const status = u.approvalStatus || 'approved';
+                          const color = status === 'pending' ? 'warning' : status === 'rejected' ? 'destructive' : 'success';
+                          return <Badge variant={color as any} className="text-xs capitalize">{status}</Badge>;
+                        })()}
+                      </td>
+                      <td className="px-4 py-3">
+                        {isSuperAdmin && u.approvalStatus === 'pending' ? (
+                          <div className="flex gap-1.5">
+                            <Button size="sm" className="h-7 px-2 text-xs"
+                              loading={approveMutation.isPending && approveMutation.variables?.id === u._id && approveMutation.variables?.action === 'approve'}
+                              onClick={() => approveMutation.mutate({ id: u._id, action: 'approve' })}>
+                              <UserCheck className="h-3.5 w-3.5 mr-1" />Approve
+                            </Button>
+                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                              loading={approveMutation.isPending && approveMutation.variables?.id === u._id && approveMutation.variables?.action === 'reject'}
+                              onClick={() => approveMutation.mutate({ id: u._id, action: 'reject' })}>
+                              <UserX className="h-3.5 w-3.5 mr-1" />Reject
+                            </Button>
+                          </div>
+                        ) : (
+                          <Badge variant="outline" className="text-xs">{formatDate(u.createdAt)}</Badge>
+                        )}
                       </td>
                     </tr>
                   ))}

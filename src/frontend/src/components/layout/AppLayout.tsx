@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 import {
   LayoutDashboard, Users, Building2, Megaphone,
   FileText, Layers, Settings, LogOut, ChevronRight,
-  Phone, ClipboardList, Shield,
+  Phone, PhoneCall, ClipboardList, Shield,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -19,6 +19,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { label: 'Dashboard', href: '/dashboard', icon: LayoutDashboard, roles: ['super_admin', 'admin', 'agent'] },
   { label: 'Submissions', href: '/submissions', icon: ClipboardList, roles: ['super_admin', 'admin', 'agent'] },
+  { label: 'Call Tracking', href: '/calls', icon: PhoneCall, roles: ['super_admin', 'admin'] },
   { label: 'Submit Lead', href: '/submit', icon: Phone, roles: ['agent'] },
   { label: 'Campaigns', href: '/campaigns', icon: Megaphone, roles: ['super_admin', 'admin'] },
   { label: 'Field Library', href: '/fields', icon: Layers, roles: ['super_admin'] },
