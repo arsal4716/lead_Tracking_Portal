@@ -96,6 +96,13 @@ auditRouter.get('/', catchAsync(async (req, res) => {
   sendPaginated(res, logs, total, page, limit);
 }));
 
+// ── Calls (tracking) ─────────────────────────────────────────────────────────
+const callRouter = require('express').Router();
+const callCtrl   = require('../controllers/call.controller');
+callRouter.use(protect, tenantIsolation);
+callRouter.get('/stats', callCtrl.getStats);
+callRouter.get('/',      callCtrl.getAll);
+
 // ── Public (no auth) ───────────────────────────────────────────────────────────
 const publicRouter = require('express').Router();
 const { apiKeyAuth } = require('../middleware/auth');
@@ -103,6 +110,9 @@ const publicCtrl     = require('../controllers/public.controller');
 publicRouter.post('/lead-ingest',                     apiKeyAuth, validate(schemas.ingestLead), publicCtrl.ingestLead);
 publicRouter.get( '/enrich/:publisherId/:campaignId', publicCtrl.enrichEndpoint);
 publicRouter.post('/enrich/:publisherId/:campaignId', publicCtrl.enrichEndpoint);
+// Call-tracking pixel — accepts both GET (pixel/macro) and POST
+publicRouter.get( '/call', callCtrl.ingestCall);
+publicRouter.post('/call', callCtrl.ingestCall);
 
 // ── Mount all routers ──────────────────────────────────────────────────────────
 router.use('/auth',        authRouter);
@@ -110,6 +120,7 @@ router.use('/publishers',  publisherRouter);
 router.use('/campaigns',   campaignRouter);
 router.use('/fields',      fieldRouter);
 router.use('/submissions', submissionRouter);
+router.use('/calls',       callRouter);
 router.use('/users',       userRouter);
 router.use('/audit',       auditRouter);
 router.use('/public',      publicRouter);

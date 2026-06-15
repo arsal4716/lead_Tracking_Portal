@@ -15,6 +15,23 @@ const submissionSchema = new mongoose.Schema(
 
     phone: { type: String, index: true },
 
+    // Normalised, digits-only phone (last 10) for fast/flexible search across formats
+    phoneNormalized: { type: String, index: true },
+
+    // Calculated from DOB at submission time (years)
+    age: { type: Number },
+
+    // Provider/destination this lead was routed to (campaign.destination snapshot)
+    providerUsed: { type: String },
+
+    // Number of times this phone has been submitted for this publisher (1 = first).
+    // Duplicates are never overwritten — each gets its own record with an
+    // incrementing attemptCount.
+    attemptCount: { type: Number, default: 1 },
+
+    // Fraud: a tracked call for this caller arrived BEFORE this lead was submitted.
+    callBeforeLead: { type: Boolean, default: false },
+
     jornaya: {
       enabled: { type: Boolean, default: false },
       valid:   { type: Boolean },
@@ -64,7 +81,9 @@ const submissionSchema = new mongoose.Schema(
 submissionSchema.index({ publisher: 1, campaign: 1, createdAt: -1 });
 submissionSchema.index({ agent: 1, createdAt: -1 });
 submissionSchema.index({ phone: 1, publisher: 1 });
+submissionSchema.index({ phoneNormalized: 1, publisher: 1 });
 submissionSchema.index({ status: 1 });
 submissionSchema.index({ source: 1 });
+submissionSchema.index({ callBeforeLead: 1 });
 
 module.exports = mongoose.model('Submission', submissionSchema);

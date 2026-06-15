@@ -6,7 +6,9 @@ const User       = require('../models/User');
 const AppError   = require('../utils/AppError');
 const { validateJornaya }    = require('./jornaya.service');
 const { validateTrustedForm } = require('./trustedform.service');
-const { sendToDestinations } = require('./ringba.service');
+const { cleanPhone }         = require('./ringba.service');
+const { IntegrationService } = require('./integration.service');
+const { calculateAge }       = require('../utils/age');
 
 // ── Load campaign ──────────────────────────────────────────────────────────────
 const loadCampaign = async (campaignId, publisherId, userRole) => {
@@ -72,11 +74,50 @@ const evaluateConditionals = (campaign, data) => {
 };
 
 // ── Duplicate check ────────────────────────────────────────────────────────────
-const checkDuplicate = async (phone, publisherId) => {
-  if (!phone) return { isDuplicate: false };
-  const existing = await Submission.findOne({ phone, publisher: publisherId })
-    .sort({ createdAt: -1 }).lean();
-  return { isDuplicate: !!existing };
+// Never overwrites duplicates — instead returns how many prior submissions exist
+// for this phone/publisher so the new record can carry an incrementing attempt #.
+const checkDuplicate = async (phoneNormalized, publisherId) => {
+  if (!phoneNormalized) return { isDuplicate: false, attemptCount: 1 };
+  const priorCount = await Submission.countDocuments({
+    phoneNormalized,
+    publisher: publisherId,
+  });
+  return { isDuplicate: priorCount > 0, attemptCount: priorCount + 1 };
+};
+
+// ── Common DOB field keys ──────────────────────────────────────────────────────
+const DOB_KEYS = ['dob', 'date_of_birth', 'dateofbirth', 'birthdate', 'birth_date', 'DOB'];
+
+const resolveAge = (data) => {
+  for (const key of DOB_KEYS) {
+    if (data[key] !== undefined && data[key] !== null && data[key] !== '') {
+      const age = calculateAge(data[key]);
+      if (age !== null) return age;
+    }
+  }
+  // Allow an already-provided age value to pass through
+  if (data.age !== undefined && data.age !== '' && !isNaN(Number(data.age))) {
+    return Number(data.age);
+  }
+  return null;
+};
+
+// ── Fraud: was a tracked call for this caller seen BEFORE this lead? ────────────
+const checkCallBeforeLead = async (phoneNormalized, publisherId, campaignId) => {
+  if (!phoneNormalized) return false;
+  try {
+    const Call = require('../models/Call');
+    // Match by callerId + publisher (+ campaign when the call carried one).
+    // Publishers are NEVER merged — the publisher scope is mandatory.
+    const existingCall = await Call.findOne({
+      publisher:       publisherId,
+      callerIdNormalized: phoneNormalized,
+      $or: [{ campaign: campaignId }, { campaign: null }, { campaign: { $exists: false } }],
+    }).sort({ callTimeStamp: 1 }).lean();
+    return !!existingCall;
+  } catch (_) {
+    return false;
+  }
 };
 
 // ── Compliance validation ──────────────────────────────────────────────────────
@@ -115,9 +156,17 @@ const processSubmission = async ({
     : (typeof data?.toObject === 'function' ? data.toObject() : (data || {}));
 
   const phone = rawData.phone || rawData.callerid || rawData.caller_id || rawData.mobile;
+  const phoneNormalized = cleanPhone(phone);
 
-  const { isDuplicate } = await checkDuplicate(phone, effectivePublisherId);
+  // DOB → age (multi-format). Injected into data so a campaign 'age' field can map it.
+  const age = resolveAge(rawData);
+  if (age !== null && (rawData.age === undefined || rawData.age === '')) {
+    rawData.age = age;
+  }
+
+  const { isDuplicate, attemptCount } = await checkDuplicate(phoneNormalized, effectivePublisherId);
   const validation      = await runValidation(campaign, rawData);
+  const callBeforeLead  = await checkCallBeforeLead(phoneNormalized, effectivePublisherId, campaign._id);
 
   const submission = await Submission.create({
     publisher:   effectivePublisherId,
@@ -127,6 +176,11 @@ const processSubmission = async ({
     repostOf,
     data:        rawData,
     phone,
+    phoneNormalized,
+    age:         age !== null ? age : undefined,
+    providerUsed: campaign.destination || 'ringba_regular',
+    attemptCount,
+    callBeforeLead,
     jornaya:     validation.jornaya,
     trustedForm: validation.trustedForm,
     apiAutofill: { used: false },
@@ -152,8 +206,10 @@ const processSubmission = async ({
     _campaignId:  campaign._id.toString(),
   };
 
-  // Send to destination(s) with agent name
-  const { sent, results } = await sendToDestinations(campaign, enrichedData, agentName);
+  // Route to destination(s) through the unified integration layer
+  const { sent, results, provider, providerLabel } = await IntegrationService.sendLead(
+    campaign, enrichedData, { agentName }
+  );
 
   await Submission.findByIdAndUpdate(submission._id, {
     ringba:             results.ringba     || { sent: false },
@@ -165,6 +221,11 @@ const processSubmission = async ({
     submissionId:       submission._id,
     status:             sent ? 'sent' : 'failed',
     isDuplicate,
+    attemptCount,
+    age,
+    callBeforeLead,
+    provider,
+    providerLabel,
     ringba:             results.ringba || null,
     destinationResults: results,
     validation,

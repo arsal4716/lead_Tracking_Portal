@@ -6,9 +6,7 @@ const { sendSuccess, sendPaginated } = require('../utils/response');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 const audit = require('../utils/audit');
-
-const buildEnrichUrl = (publisherId, campaignId) =>
-  `${process.env.FRONTEND_URL}/api/v1/public/enrich/${publisherId}/${campaignId}`;
+const { buildEnrichUrl } = require('../config/urls');
 
 // GET /campaigns
 exports.getAll = catchAsync(async (req, res) => {
