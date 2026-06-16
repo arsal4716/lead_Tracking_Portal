@@ -124,6 +124,21 @@ app.get('/health', (req, res) => {
 app.use('/api/v1', routes);
 
 /* ─────────────────────────────────────────────
+   CALL-TRACKING WEBHOOK (PATH-STYLE)
+   Some providers (CallGrid) fire the pixel as:
+     /callTimeStamp=<ms>&publisherName=<x>&callerId=<y>
+   i.e. the params are baked into the PATH with no "?" separator.
+   Parse them out and hand off to the normal call ingest handler.
+───────────────────────────────────────────── */
+const querystring = require('querystring');
+const callController = require('./controllers/call.controller');
+app.get(/^\/callTimeStamp=/, (req, res, next) => {
+  const raw = req.originalUrl.replace(/^\/+/, '');
+  req.rawCallParams = querystring.parse(raw);
+  return callController.ingestCall(req, res, next);
+});
+
+/* ─────────────────────────────────────────────
    FRONTEND BUILD (CLEAN + SINGLE SOURCE)
 ───────────────────────────────────────────── */
 const frontendDistPath = path.join(__dirname, 'frontend', 'dist');

@@ -71,6 +71,7 @@ export interface Campaign {
   destination: CampaignDestination;
   ringbaId?: string;
   ringbaRtbUrl?: string;
+  ringbaRtbKey?: string;
   callgridUrl?: string;
   isActive: boolean;
   jornayaEnabled: boolean; trustedFormEnabled: boolean; apiAutofillEnabled: boolean;

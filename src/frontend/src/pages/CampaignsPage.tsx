@@ -8,7 +8,7 @@ import { Card, CardContent } from '@/components/ui/index';
 import { Badge } from '@/components/ui/index';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/index';
-import { copyToClipboard, formatDate, providerLabel, providerBadgeColor } from '@/lib/utils';
+import { copyToClipboard, formatDate, providerLabel, providerBadgeColor, campaignProviderKey } from '@/lib/utils';
 import {
   Plus, Copy, Check, Search, ExternalLink,
   ToggleLeft, ToggleRight, Loader2, Link2,
@@ -161,7 +161,7 @@ export default function CampaignsPage() {
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Campaign</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Publisher</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Provider</th>
-                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Ringba ID</th>
+                    <th className="text-left px-4 py-3 font-medium text-muted-foreground">Provider Key</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Fields</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Validation</th>
                     <th className="text-left px-4 py-3 font-medium text-muted-foreground">Status</th>
@@ -189,7 +189,7 @@ export default function CampaignsPage() {
                       </td>
 
                       <td className="px-4 py-3">
-                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{campaign.ringbaId || '—'}</code>
+                        <code className="text-xs bg-muted px-1.5 py-0.5 rounded break-all">{campaignProviderKey(campaign)}</code>
                       </td>
 
                       <td className="px-4 py-3 text-muted-foreground">

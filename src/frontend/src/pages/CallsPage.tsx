@@ -6,21 +6,14 @@ import { Card, CardContent } from '@/components/ui/index';
 import { Badge, Input } from '@/components/ui/index';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/index';
-import { Search, RefreshCw, Loader2, PhoneCall, PhoneOff, ShieldAlert, Activity } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { Search, RefreshCw, Loader2, PhoneCall, PhoneOff, ShieldAlert, Activity, Trash2 } from 'lucide-react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import { toast } from 'sonner';
 import {
   getCallStatusBadgeColor, callStatusLabel, formatUsPhone, formatPct,
+  formatEstFull, todayStr, timeGap,
 } from '@/lib/utils';
 import type { Call, CallStats, Campaign, Publisher } from '@/types';
-
-const formatEST = (iso?: string): string => {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('en-US', {
-    timeZone: 'America/New_York',
-    month: '2-digit', day: '2-digit', year: 'numeric',
-    hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true,
-  });
-};
 
 export default function CallsPage() {
   const { user } = useAuthStore();
@@ -28,8 +21,9 @@ export default function CallsPage() {
   const isSuperAdmin = user?.role === 'super_admin';
 
   const [page, setPage] = useState(1);
+  // Default to today's calls (Eastern).
   const [filters, setFilters] = useState({
-    search: '', publisher: '', campaign: '', status: '', fraud: '', from: '', to: '',
+    search: '', publisher: '', campaign: '', status: '', fraud: '', from: todayStr(), to: todayStr(),
   });
 
   const params = {
@@ -64,6 +58,16 @@ export default function CallsPage() {
     queryKey: ['calls-publishers'],
     queryFn: () => publisherService.getAll({ limit: 100 }),
     enabled: isSuperAdmin,
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => callService.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['calls'] });
+      qc.invalidateQueries({ queryKey: ['calls-stats'] });
+      toast.success('Call deleted.');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Delete failed.'),
   });
 
   const calls: Call[]            = data?.data?.data || [];
@@ -216,13 +220,17 @@ export default function CallsPage() {
                     <th className="text-left px-4 py-3 font-semibold">Publisher</th>
                     <th className="text-left px-4 py-3 font-semibold">Campaign</th>
                     <th className="text-left px-4 py-3 font-semibold">Status</th>
-                    <th className="text-left px-4 py-3 font-semibold">Matched lead</th>
-                    <th className="text-left px-4 py-3 font-semibold">Call time (EST)</th>
+                    <th className="text-left px-4 py-3 font-semibold">Call received (EST)</th>
+                    <th className="text-left px-4 py-3 font-semibold">Form submitted (EST)</th>
+                    <th className="text-left px-4 py-3 font-semibold">Difference</th>
+                    {isSuperAdmin && <th className="text-left px-4 py-3 font-semibold"></th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {calls.map((call) => {
                     const fraud = call.isFraud;
+                    const leadAt = call.matchedLead?.createdAt;
+                    const gap = timeGap(call.callTimeStamp, leadAt);
                     return (
                       <tr key={call._id} className={fraud ? 'bg-red-50' : 'hover:bg-slate-50/80'}>
                         <td className="px-4 py-3">
@@ -237,10 +245,30 @@ export default function CallsPage() {
                         <td className="px-4 py-3">
                           <Badge className={getCallStatusBadgeColor(call.status)}>{callStatusLabel(call.status)}</Badge>
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-500">
-                          {call.matchedLead ? formatUsPhone(call.matchedLead.phone) : <span className="text-slate-400">none</span>}
+                        {/* Exact call-received time */}
+                        <td className={`px-4 py-3 text-xs whitespace-nowrap ${fraud ? 'text-red-700 font-medium' : 'text-slate-600'}`}>
+                          {formatEstFull(call.callTimeStamp)}
                         </td>
-                        <td className="px-4 py-3 text-xs text-slate-500 whitespace-nowrap">{formatEST(call.callTimeStamp)}</td>
+                        {/* Exact lead form-submission time (same page, easy compare) */}
+                        <td className="px-4 py-3 text-xs whitespace-nowrap text-slate-600">
+                          {leadAt ? formatEstFull(leadAt) : <span className="text-slate-400">no lead</span>}
+                        </td>
+                        {/* Difference between the two */}
+                        <td className="px-4 py-3 text-xs whitespace-nowrap">
+                          {gap
+                            ? <span className={gap.fraud ? 'text-red-600 font-semibold' : 'text-emerald-600'}>{gap.label}</span>
+                            : <span className="text-slate-400">—</span>}
+                        </td>
+                        {isSuperAdmin && (
+                          <td className="px-4 py-3">
+                            <Button variant="ghost" size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              title="Delete call"
+                              onClick={() => { if (confirm('Delete this call record?')) deleteMutation.mutate(call._id); }}>
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}

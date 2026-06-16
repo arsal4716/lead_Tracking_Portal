@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Input, Label, Card, CardContent } from '@/components/ui/index';
 import { Badge } from '@/components/ui/index';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/index';
-import { Plus, Search, Loader2, Users, X, ToggleLeft, ToggleRight, UserCheck, UserX } from 'lucide-react';
+import { Plus, Search, Loader2, Users, X, ToggleLeft, ToggleRight, UserCheck, UserX, Pencil, Trash2 } from 'lucide-react';
 import { formatDate } from '@/lib/utils';
 import type { User } from '@/types';
 
@@ -26,6 +26,7 @@ export default function UsersPage() {
   const [approvalFilter, setApprovalFilter] = useState('');
   const [page, setPage] = useState(1);
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingUser, setEditingUser] = useState<User | null>(null);
 
   const isSuperAdmin = currentUser?.role === 'super_admin';
 
@@ -49,14 +50,30 @@ export default function UsersPage() {
     name: string; email: string; password: string; role: string; publisher?: string;
   }>();
 
-  const createMutation = useMutation({
-    mutationFn: (d: any) => userService.create(d),
+  const saveMutation = useMutation({
+    mutationFn: (d: any) => {
+      if (editingUser) {
+        const payload = { ...d };
+        if (!payload.password) delete payload.password; // keep existing password
+        return userService.update(editingUser._id, payload);
+      }
+      return userService.create(d);
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['users'] });
-      toast.success('User created.');
+      toast.success(editingUser ? 'User updated.' : 'User created.');
       closeModal();
     },
-    onError: (err: any) => toast.error(err.response?.data?.message || 'Create failed.'),
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Save failed.'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => userService.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      toast.success('User deleted.');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Delete failed.'),
   });
 
   const toggleMutation = useMutation({
@@ -83,7 +100,14 @@ export default function UsersPage() {
   const publishers = publishersData?.data?.data || [];
   const watchedRole = watch('role');
 
-  const closeModal = () => { setModalOpen(false); reset(); };
+  const openModal = (u?: User) => {
+    setEditingUser(u || null);
+    reset(u
+      ? { name: u.name, email: u.email, password: '', role: u.role, publisher: typeof u.publisher === 'object' ? u.publisher?._id : (u.publisher as any) }
+      : { name: '', email: '', password: '', role: '', publisher: '' });
+    setModalOpen(true);
+  };
+  const closeModal = () => { setModalOpen(false); setEditingUser(null); reset(); };
 
   const availableRoles = currentUser?.role === 'super_admin'
     ? ['super_admin', 'admin', 'agent']
@@ -96,7 +120,7 @@ export default function UsersPage() {
           <h1 className="section-title">Users</h1>
           <p className="text-sm text-muted-foreground">{meta?.total ?? '—'} users</p>
         </div>
-        <Button onClick={() => setModalOpen(true)}>
+        <Button onClick={() => openModal()}>
           <Plus className="h-4 w-4 mr-2" /> New User
         </Button>
       </div>
@@ -200,22 +224,33 @@ export default function UsersPage() {
                         })()}
                       </td>
                       <td className="px-4 py-3">
-                        {isSuperAdmin && u.approvalStatus === 'pending' ? (
-                          <div className="flex gap-1.5">
-                            <Button size="sm" className="h-7 px-2 text-xs"
-                              loading={approveMutation.isPending && approveMutation.variables?.id === u._id && approveMutation.variables?.action === 'approve'}
-                              onClick={() => approveMutation.mutate({ id: u._id, action: 'approve' })}>
-                              <UserCheck className="h-3.5 w-3.5 mr-1" />Approve
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {isSuperAdmin && u.approvalStatus === 'pending' && (
+                            <>
+                              <Button size="sm" className="h-7 px-2 text-xs"
+                                loading={approveMutation.isPending && approveMutation.variables?.id === u._id && approveMutation.variables?.action === 'approve'}
+                                onClick={() => approveMutation.mutate({ id: u._id, action: 'approve' })}>
+                                <UserCheck className="h-3.5 w-3.5 mr-1" />Approve
+                              </Button>
+                              <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
+                                loading={approveMutation.isPending && approveMutation.variables?.id === u._id && approveMutation.variables?.action === 'reject'}
+                                onClick={() => approveMutation.mutate({ id: u._id, action: 'reject' })}>
+                                <UserX className="h-3.5 w-3.5 mr-1" />Reject
+                              </Button>
+                            </>
+                          )}
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => openModal(u)}>
+                            <Pencil className="h-3.5 w-3.5 mr-1" />Edit
+                          </Button>
+                          {isSuperAdmin && u._id !== currentUser?._id && (
+                            <Button variant="ghost" size="sm"
+                              className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                              title="Delete user"
+                              onClick={() => { if (confirm(`Delete user "${u.name}" permanently?`)) deleteMutation.mutate(u._id); }}>
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
-                            <Button size="sm" variant="outline" className="h-7 px-2 text-xs text-destructive border-destructive/30 hover:bg-destructive/10"
-                              loading={approveMutation.isPending && approveMutation.variables?.id === u._id && approveMutation.variables?.action === 'reject'}
-                              onClick={() => approveMutation.mutate({ id: u._id, action: 'reject' })}>
-                              <UserX className="h-3.5 w-3.5 mr-1" />Reject
-                            </Button>
-                          </div>
-                        ) : (
-                          <Badge variant="outline" className="text-xs">{formatDate(u.createdAt)}</Badge>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -242,10 +277,10 @@ export default function UsersPage() {
           <Card className="w-full max-w-md">
             <CardContent className="p-6">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="font-semibold">New User</h2>
+                <h2 className="font-semibold">{editingUser ? 'Edit User' : 'New User'}</h2>
                 <button onClick={closeModal}><X className="h-4 w-4" /></button>
               </div>
-              <form onSubmit={handleSubmit((d) => createMutation.mutate(d))} className="space-y-4">
+              <form onSubmit={handleSubmit((d) => saveMutation.mutate(d))} className="space-y-4">
                 <div className="space-y-2">
                   <Label>Full Name *</Label>
                   <Input placeholder="John Smith" {...register('name', { required: true })} />
@@ -255,8 +290,10 @@ export default function UsersPage() {
                   <Input type="email" placeholder="john@example.com" {...register('email', { required: true })} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Password *</Label>
-                  <Input type="password" placeholder="Min 8 characters" {...register('password', { required: true, minLength: 8 })} />
+                  <Label>Password {editingUser ? '' : '*'}</Label>
+                  <Input type="password"
+                    placeholder={editingUser ? 'Leave blank to keep current' : 'Min 8 characters'}
+                    {...register('password', { required: !editingUser, minLength: 8 })} />
                 </div>
                 <div className="space-y-2">
                   <Label>Role *</Label>
@@ -298,7 +335,7 @@ export default function UsersPage() {
                 )}
                 <div className="flex gap-3 pt-2">
                   <Button type="button" variant="outline" className="flex-1" onClick={closeModal}>Cancel</Button>
-                  <Button type="submit" className="flex-1" loading={createMutation.isPending}>Create User</Button>
+                  <Button type="submit" className="flex-1" loading={saveMutation.isPending}>{editingUser ? 'Update User' : 'Create User'}</Button>
                 </div>
               </form>
             </CardContent>

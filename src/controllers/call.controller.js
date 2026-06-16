@@ -10,6 +10,9 @@ const { ROLES }  = require('../models/User');
 const { cleanPhone } = require('../services/ringba.service');
 const { sendSuccess, sendPaginated } = require('../utils/response');
 const catchAsync = require('../utils/catchAsync');
+const AppError   = require('../utils/AppError');
+const audit      = require('../utils/audit');
+const { buildDateFilter } = require('../utils/estDate');
 
 // ── Lenient timestamp parsing ───────────────────────────────────────────────────
 // Accepts epoch seconds, epoch millis, or ISO strings. Falls back to "now".
@@ -25,7 +28,9 @@ const parseTimestamp = (raw) => {
 // ── Public: incoming call event from the call-tracking provider ─────────────────
 // GET/POST /api/v1/public/call?callTimeStamp=..&publisherName=..&callerId=..
 exports.ingestCall = catchAsync(async (req, res) => {
-  const q = { ...req.query, ...req.body };
+  // `rawCallParams` is set when the provider fires a path-style webhook with no
+  // query separator (e.g. /callTimeStamp=..&publisherName=..&callerId=..).
+  const q = req.rawCallParams || { ...req.query, ...req.body };
 
   const publisherName = q.publisherName || q.VendorName || q.vendorName || null;
   const callerId      = q.callerId || q.CallerId || q.caller_id || q.callerid || null;
@@ -121,15 +126,8 @@ exports.getAll = catchAsync(async (req, res) => {
     const normalized = cleanPhone(req.query.phone);
     if (normalized) filter.callerIdNormalized = { $regex: normalized, $options: 'i' };
   }
-  if (req.query.from || req.query.to) {
-    filter.callTimeStamp = {};
-    if (req.query.from) filter.callTimeStamp.$gte = new Date(req.query.from);
-    if (req.query.to) {
-      const toDate = new Date(req.query.to);
-      toDate.setHours(23, 59, 59, 999);
-      filter.callTimeStamp.$lte = toDate;
-    }
-  }
+  const dateFilter = buildDateFilter(req.query.from, req.query.to);
+  if (dateFilter) filter.callTimeStamp = dateFilter;
 
   const [calls, total] = await Promise.all([
     Call.find(filter)
@@ -152,15 +150,8 @@ exports.getStats = catchAsync(async (req, res) => {
   const match = scopeFilter(req);
   if (match.publisher) match.publisher = mongoose.Types.ObjectId.createFromHexString(String(match.publisher));
 
-  if (req.query.from || req.query.to) {
-    match.callTimeStamp = {};
-    if (req.query.from) match.callTimeStamp.$gte = new Date(req.query.from);
-    if (req.query.to) {
-      const toDate = new Date(req.query.to);
-      toDate.setHours(23, 59, 59, 999);
-      match.callTimeStamp.$lte = toDate;
-    }
-  }
+  const dateFilter = buildDateFilter(req.query.from, req.query.to);
+  if (dateFilter) match.callTimeStamp = dateFilter;
 
   const [totals, byStatus, perPublisher] = await Promise.all([
     Call.countDocuments(match),
@@ -202,4 +193,17 @@ exports.getStats = catchAsync(async (req, res) => {
     byStatus,
     perPublisher,
   });
+});
+
+// ── DELETE /calls/:id — super_admin only ──────────────────────────────────────
+exports.deleteOne = catchAsync(async (req, res, next) => {
+  const call = await Call.findByIdAndDelete(req.params.id);
+  if (!call) return next(new AppError('Call not found.', 404));
+
+  await audit({
+    user: req.user, publisher: call.publisher,
+    action: 'DELETE_CALL', resource: 'Call', resourceId: call._id, req,
+  });
+
+  sendSuccess(res, { message: 'Call deleted.' });
 });

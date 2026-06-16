@@ -12,7 +12,7 @@ import {
   Search, RefreshCw, ChevronDown, ChevronUp, Loader2,
   CheckCircle, XCircle, Minus, ClipboardList, Trash2,
 } from 'lucide-react';
-import { getStatusBadgeColor, getSourceBadgeColor } from '@/lib/utils';
+import { getStatusBadgeColor, getSourceBadgeColor, todayStr, formatEstFull } from '@/lib/utils';
 import type { Submission, Campaign } from '@/types';
 
 // ── EST timestamp formatter ────────────────────────────────────────────────────
@@ -48,6 +48,7 @@ export default function SubmissionsPage() {
   const [repostingId, setRepostingId] = useState<string | null>(null);
   const [showReset,   setShowReset]   = useState(false);
 
+  // Default to today's records (Eastern).
   const [filters, setFilters] = useState({
     search:    '',
     publisher: '',
@@ -55,8 +56,8 @@ export default function SubmissionsPage() {
     source:    '',
     status:    '',
     fraud:     '',
-    from:      '',
-    to:        '',
+    from:      todayStr(),
+    to:        todayStr(),
   });
 
   const PAGE_SIZE = 20;
@@ -122,6 +123,15 @@ export default function SubmissionsPage() {
       setShowReset(false);
     },
     onError: (err: any) => toast.error(err.response?.data?.message || 'Reset failed.'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => submissionService.delete(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['submissions'] });
+      toast.success('Submission deleted.');
+    },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Delete failed.'),
   });
 
   // ── Data ──────────────────────────────────────────────────────────────────────
@@ -414,20 +424,32 @@ export default function SubmissionsPage() {
 
                           {/* Actions */}
                           <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                            <RepostMenu
-                              submissionId={sub._id}
-                              currentCampaignId={
-                                sub.campaign && typeof sub.campaign === 'object'
-                                  ? (sub.campaign as any)._id
-                                  : String(sub.campaign)
-                              }
-                              campaigns={campaigns}
-                              isLoading={repostingId === sub._id && repostMutation.isPending}
-                              onRepost={(targetId) => {
-                                setRepostingId(sub._id);
-                                repostMutation.mutate({ id: sub._id, targetCampaignId: targetId });
-                              }}
-                            />
+                            <div className="flex items-center gap-1">
+                              <RepostMenu
+                                submissionId={sub._id}
+                                currentCampaignId={
+                                  sub.campaign && typeof sub.campaign === 'object'
+                                    ? (sub.campaign as any)._id
+                                    : String(sub.campaign)
+                                }
+                                campaigns={campaigns}
+                                isLoading={repostingId === sub._id && repostMutation.isPending}
+                                onRepost={(targetId) => {
+                                  setRepostingId(sub._id);
+                                  repostMutation.mutate({ id: sub._id, targetCampaignId: targetId });
+                                }}
+                              />
+                              {isSuperAdmin && (
+                                <Button
+                                  variant="ghost" size="sm"
+                                  className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                                  title="Delete submission"
+                                  onClick={() => { if (confirm('Delete this submission permanently?')) deleteMutation.mutate(sub._id); }}
+                                >
+                                  <Trash2 className="h-3.5 w-3.5" />
+                                </Button>
+                              )}
+                            </div>
                           </td>
                         </tr>
 
@@ -487,23 +509,9 @@ export default function SubmissionsPage() {
                                         </div>
                                       )}
 
-                                      {result.request?.params && Object.keys(result.request.params).length > 0 && (
-                                        <div>
-                                          <p className="text-xs text-slate-400 mb-1">Request payload (field → value)</p>
-                                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
-                                            {Object.entries(result.request.params).map(([k, v]) => (
-                                              <div key={k} className="bg-slate-50 rounded px-2 py-1 border border-slate-100">
-                                                <span className="text-[11px] text-slate-400">{k}</span>
-                                                <div className="text-xs font-medium text-slate-700 truncate">{String(v ?? '—')}</div>
-                                              </div>
-                                            ))}
-                                          </div>
-                                        </div>
-                                      )}
-
                                       {result.response !== undefined && result.response !== null && (
                                         <div>
-                                          <p className="text-xs text-slate-400 mb-0.5">Vendor response</p>
+                                          <p className="text-xs text-slate-400 mb-0.5">API response</p>
                                           <pre className="text-[11px] font-mono text-slate-600 bg-slate-50 rounded p-2 overflow-x-auto max-h-40">{
                                             typeof result.response === 'string' ? result.response : JSON.stringify(result.response, null, 2)
                                           }</pre>
@@ -521,9 +529,9 @@ export default function SubmissionsPage() {
                                 </div>
                               )}
 
-                              {/* Full timestamp */}
+                              {/* Full timestamp — exact EST form submission time */}
                               <p className="text-xs text-slate-400 mt-2">
-                                Submitted: {formatEST(sub.createdAt).date} at {formatEST(sub.createdAt).time} EST
+                                Form submitted (EST): <span className="font-medium text-slate-600">{formatEstFull(sub.createdAt)}</span>
                               </p>
                             </td>
                           </tr>
