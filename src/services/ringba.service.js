@@ -43,7 +43,24 @@ const buildFullUrl = (base, params) => {
   }
 };
 
-// ── Extract the CallGrid unique key from a pasted URL ───────────────────────────
+// ── Resolve a destination base URL from EITHER a bare key OR a full URL ──────────
+// Users now paste just the provider key (e.g. 32c482e… / cmph33fv…). For backward
+// compatibility a full pasted URL still works (its sample params become defaults).
+const resolveRtbBase = (value) => {
+  const v = String(value || '').trim();
+  if (!v) return { base: null, staticParams: {} };
+  if (/^https?:\/\//i.test(v)) return parseApiUrl(v);
+  return { base: `https://rtb.ringba.com/v1/production/${v}.json`, staticParams: {} };
+};
+
+const resolveCallgridBase = (value) => {
+  const v = String(value || '').trim();
+  if (!v) return { base: null, staticParams: {} };
+  if (/^https?:\/\//i.test(v)) return parseApiUrl(v);
+  return { base: `https://bid.callgrid.com/api/bid/${v}`, staticParams: {} };
+};
+
+// ── Extract the CallGrid unique key from a pasted URL (or a bare key) ────────────
 // e.g. https://bid.callgrid.com/api/bid/cmp5yu7uu04qi07js0iz5mtml?... → cmp5yu...
 const extractCallgridKey = (rawUrl) => {
   if (!rawUrl) return null;
@@ -137,10 +154,10 @@ const sendToRingba = async (ringbaId, params) => {
 //   https://rtb.ringba.com/v1/production/32c482e139a74caebb21f5145683e72b.json?CID=xxx&zip_code=xxx
 // Params from the pasted URL are static defaults; campaign field mapping overrides them.
 const sendToRingbaRtb = async (campaign, submissionData, agentName) => {
-  const rawUrl = campaign.ringbaRtbUrl;
-  if (!rawUrl) return { sent: false, sentAt: new Date(), provider: 'ringba_rtb', request: null, response: null, error: 'Ringba RTB URL not configured' };
+  const rawUrl = campaign.ringbaRtbKey || campaign.ringbaRtbUrl;
+  if (!rawUrl) return { sent: false, sentAt: new Date(), provider: 'ringba_rtb', request: null, response: null, error: 'Ringba RTB key/URL not configured' };
 
-  const { base, staticParams } = parseApiUrl(rawUrl);
+  const { base, staticParams } = resolveRtbBase(rawUrl);
   const fieldParams  = buildParams(campaign, submissionData, 'rtb', agentName);
   const finalParams  = { ...staticParams, ...fieldParams };
   const request = { provider: 'ringba_rtb', url: base, params: finalParams, fullUrl: buildFullUrl(base, finalParams) };
@@ -161,10 +178,10 @@ const sendToRingbaRtb = async (campaign, submissionData, agentName) => {
 //   https://bid.callgrid.com/api/bid/cmp5yu7uu04qk07js2y9fbxkn?CallerId=5551234567&InboundStateCode=CA&InboundZipCode=90210
 // All campaign fields map via their per-destination callgrid param key override.
 const sendToCallGrid = async (campaign, submissionData, agentName) => {
-  const rawUrl = campaign.callgridUrl;
-  if (!rawUrl) return { sent: false, sentAt: new Date(), provider: 'callgrid', request: null, response: null, error: 'CallGrid URL not configured' };
+  const rawUrl = campaign.callgridKey || campaign.callgridUrl;
+  if (!rawUrl) return { sent: false, sentAt: new Date(), provider: 'callgrid', request: null, response: null, error: 'CallGrid key/URL not configured' };
 
-  const { base, staticParams } = parseApiUrl(rawUrl);
+  const { base, staticParams } = resolveCallgridBase(rawUrl);
   const fieldParams  = buildParams(campaign, submissionData, 'callgrid', agentName);
   const finalParams  = { ...staticParams, ...fieldParams };
   const request = {
