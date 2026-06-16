@@ -5,8 +5,28 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+const EST_TZ = 'America/New_York';
+
+// All timestamps display in Eastern Time.
 export const formatDate = (date: string) =>
-  new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  new Date(date).toLocaleString('en-US', {
+    timeZone: EST_TZ,
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
+
+// Precise EST timestamp matching the CallGrid portal format:
+//   "Jun 15, 2026, 7:16:16 PM"
+export const formatEstFull = (date?: string | null): string => {
+  if (!date) return '—';
+  const d = new Date(date);
+  if (isNaN(d.getTime())) return '—';
+  return d.toLocaleString('en-US', {
+    timeZone: EST_TZ,
+    month: 'short', day: 'numeric', year: 'numeric',
+    hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true,
+  });
+};
 
 export const copyToClipboard = async (text: string): Promise<boolean> => {
   try {
@@ -86,12 +106,54 @@ export const formatUsPhone = (raw?: string | null): string => {
   return String(raw);
 };
 
-// Local YYYY-MM-DD (for date inputs / "today" defaults)
-export const todayStr = (): string => {
-  const d = new Date();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${d.getFullYear()}-${m}-${day}`;
+// Today's date in Eastern Time as YYYY-MM-DD (for "today" defaults / date inputs).
+// en-CA yields YYYY-MM-DD.
+export const todayStr = (): string =>
+  new Intl.DateTimeFormat('en-CA', { timeZone: EST_TZ }).format(new Date());
+
+// Human-readable signed duration between a call and a lead submission.
+// Returns the magnitude + which event came first.
+export const timeGap = (callIso?: string, leadIso?: string): { label: string; fraud: boolean } | null => {
+  if (!callIso || !leadIso) return null;
+  const call = new Date(callIso).getTime();
+  const lead = new Date(leadIso).getTime();
+  if (isNaN(call) || isNaN(lead)) return null;
+
+  const diff = Math.abs(lead - call);
+  const secs = Math.floor(diff / 1000);
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  const parts = [h ? `${h}h` : '', m ? `${m}m` : '', `${s}s`].filter(Boolean).join(' ');
+
+  // Fraud when the call arrived before the lead was submitted.
+  const fraud = call < lead;
+  return { label: `${parts} (${fraud ? 'call first' : 'lead first'})`, fraud };
+};
+
+// Extract the unique provider key to display per campaign destination.
+export const campaignProviderKey = (c: any): string => {
+  const dest: string = c?.destination || '';
+  const fromUrl = (url?: string): string => {
+    if (!url) return '';
+    try {
+      const u = new URL(url);
+      const parts = u.pathname.split('/').filter(Boolean);
+      return parts[parts.length - 1] || '';
+    } catch {
+      const noQuery = String(url).split('?')[0];
+      const parts = noQuery.split('/').filter(Boolean);
+      return parts[parts.length - 1] || '';
+    }
+  };
+
+  if (dest === 'callgrid') return fromUrl(c.callgridUrl) || '—';
+  if (dest === 'ringba_rtb') return c.ringbaRtbKey || fromUrl(c.ringbaRtbUrl) || '—';
+  if (dest.includes('callgrid') && dest.includes('rtb'))
+    return [c.ringbaRtbKey || fromUrl(c.ringbaRtbUrl), fromUrl(c.callgridUrl)].filter(Boolean).join(' · ') || '—';
+  if (dest.includes('callgrid'))
+    return [c.ringbaId, fromUrl(c.callgridUrl)].filter(Boolean).join(' · ') || '—';
+  return c.ringbaId || '—';
 };
 
 export const formatPct = (n: number): string => `${(n * 100).toFixed(1)}%`;

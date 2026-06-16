@@ -60,6 +60,8 @@ submissionRouter.get(   '/:id',         submissionCtrl.getOne);
 submissionRouter.post(  '/:id/repost',  validate(schemas.repostLead), submissionCtrl.repost);
 // Reset — super_admin only; clears ALL submission records (fresh start)
 submissionRouter.delete('/reset',       restrictTo(ROLES.SUPER_ADMIN), submissionCtrl.reset);
+// Delete a single submission — super_admin only (must come after /reset)
+submissionRouter.delete('/:id',         restrictTo(ROLES.SUPER_ADMIN), submissionCtrl.deleteOne);
 
 // ── Users ──────────────────────────────────────────────────────────────────────
 const userRouter = require('express').Router();
@@ -104,6 +106,7 @@ const callCtrl   = require('../controllers/call.controller');
 callRouter.use(protect, tenantIsolation);
 callRouter.get('/stats', callCtrl.getStats);
 callRouter.get('/',      callCtrl.getAll);
+callRouter.delete('/:id', restrictTo(ROLES.SUPER_ADMIN), callCtrl.deleteOne);
 
 // ── Public (no auth) ───────────────────────────────────────────────────────────
 const publicRouter = require('express').Router();

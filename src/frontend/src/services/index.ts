@@ -118,6 +118,9 @@ export const submissionService = {
       { data: { confirm: 'RESET_ALL_SUBMISSIONS' } }
     ),
 
+  // Super_admin only — delete a single submission
+  delete: (id: string) => api.delete<ApiResponse<{ message: string }>>(`/submissions/${id}`),
+
   getStats: (params?: Record<string, unknown>) =>
     api.get<ApiResponse<SubmissionStats>>('/submissions/stats', { params }),
 };
@@ -129,6 +132,9 @@ export const callService = {
 
   getStats: (params?: Record<string, unknown>) =>
     api.get<ApiResponse<CallStats>>('/calls/stats', { params }),
+
+  // Super_admin only — delete a single call record
+  delete: (id: string) => api.delete<ApiResponse<{ message: string }>>(`/calls/${id}`),
 };
 
 // ── Users ──────────────────────────────────────────────────────────────────────

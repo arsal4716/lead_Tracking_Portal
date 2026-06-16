@@ -6,6 +6,8 @@ const { processSubmission, repostSubmission } = require('../services/submission.
 const { sendSuccess, sendPaginated } = require('../utils/response');
 const AppError   = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
+const audit      = require('../utils/audit');
+const { buildDateFilter } = require('../utils/estDate');
 
 // POST /submissions
 exports.submit = catchAsync(async (req, res) => {
@@ -65,17 +67,9 @@ exports.getAll = catchAsync(async (req, res) => {
     }
   }
 
-  // Date range filtering (from/to are EST date strings — store as UTC)
-  if (req.query.from || req.query.to) {
-    filter.createdAt = {};
-    if (req.query.from) filter.createdAt.$gte = new Date(req.query.from);
-    if (req.query.to) {
-      // Include the full "to" day by going to end of that day
-      const toDate = new Date(req.query.to);
-      toDate.setHours(23, 59, 59, 999);
-      filter.createdAt.$lte = toDate;
-    }
-  }
+  // Date range filtering — from/to are Eastern (YYYY-MM-DD) or ISO; resolved to UTC.
+  const dateFilter = buildDateFilter(req.query.from, req.query.to);
+  if (dateFilter) filter.createdAt = dateFilter;
 
   const [submissions, total] = await Promise.all([
     Submission.find(filter)
@@ -140,16 +134,9 @@ exports.getStats = catchAsync(async (req, res) => {
     matchStage.campaign = require('mongoose').Types.ObjectId.createFromHexString(req.query.campaign);
   }
 
-  // Date range — dashboard defaults to "today" but range is honoured when provided.
-  if (req.query.from || req.query.to) {
-    matchStage.createdAt = {};
-    if (req.query.from) matchStage.createdAt.$gte = new Date(req.query.from);
-    if (req.query.to) {
-      const toDate = new Date(req.query.to);
-      toDate.setHours(23, 59, 59, 999);
-      matchStage.createdAt.$lte = toDate;
-    }
-  }
+  // Date range — dashboard defaults to "today" (Eastern) but range is honoured.
+  const dateFilter = buildDateFilter(req.query.from, req.query.to);
+  if (dateFilter) matchStage.createdAt = dateFilter;
 
   const [totals, invalidLeads, bySource, byStatus, byCampaign, perPublisher] = await Promise.all([
     Submission.countDocuments(matchStage),
@@ -205,4 +192,17 @@ exports.reset = catchAsync(async (req, res) => {
 
   const result = await Submission.deleteMany({});
   sendSuccess(res, { message: `Deleted ${result.deletedCount} submissions. CRM is now fresh.` });
+});
+
+// DELETE /submissions/:id  — delete a single submission (super_admin only)
+exports.deleteOne = catchAsync(async (req, res, next) => {
+  const submission = await Submission.findByIdAndDelete(req.params.id);
+  if (!submission) return next(new AppError('Submission not found.', 404));
+
+  await audit({
+    user: req.user, publisher: submission.publisher,
+    action: 'DELETE_SUBMISSION', resource: 'Submission', resourceId: submission._id, req,
+  });
+
+  sendSuccess(res, { message: 'Submission deleted.' });
 });

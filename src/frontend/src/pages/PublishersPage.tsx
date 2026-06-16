@@ -8,7 +8,7 @@ import { Input, Label, Card, CardContent } from '@/components/ui/index';
 import { Badge } from '@/components/ui/index';
 import {
   Plus, Search, RefreshCw, Loader2, Building2, X,
-  Copy, Check, Eye, EyeOff,
+  Copy, Check, Eye, EyeOff, Ban, Power, Trash2,
 } from 'lucide-react';
 import { formatDate, copyToClipboard } from '@/lib/utils';
 import type { Publisher } from '@/types';
@@ -54,6 +54,22 @@ export default function PublishersPage() {
     mutationFn: ({ id, ips }: { id: string; ips: string[] }) => publisherService.updateIpWhitelist(id, ips),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['publishers'] }); toast.success('IP whitelist updated.'); setIpPublisher(null); },
     onError: () => toast.error('Failed to update whitelist.'),
+  });
+
+  // Revoke / restore access — paused publishers (and all their agents) can't log in.
+  const toggleMutation = useMutation({
+    mutationFn: (id: string) => publisherService.toggleActive(id),
+    onSuccess: (res: any) => {
+      qc.invalidateQueries({ queryKey: ['publishers'] });
+      toast.success(res.data.data.isActive ? 'Publisher access restored.' : 'Publisher access revoked.');
+    },
+    onError: () => toast.error('Failed to update access.'),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => publisherService.delete(id),
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['publishers'] }); toast.success('Publisher deleted.'); },
+    onError: (err: any) => toast.error(err.response?.data?.message || 'Delete failed.'),
   });
 
   const publishers: Publisher[] = data?.data?.data || [];
@@ -146,7 +162,7 @@ export default function PublishersPage() {
                       </td>
                       <td className="px-4 py-3 text-xs text-muted-foreground">{formatDate(p.createdAt)}</td>
                       <td className="px-4 py-3">
-                        <div className="flex gap-1">
+                        <div className="flex gap-1 flex-wrap">
                           <Button variant="ghost" size="sm" className="text-xs h-7" onClick={() => openModal(p)}>Edit</Button>
                           <Button
                             variant="ghost"
@@ -159,6 +175,27 @@ export default function PublishersPage() {
                             }}
                           >
                             <RefreshCw className="h-3 w-3 mr-1" /> Rotate Key
+                          </Button>
+                          {/* Revoke / restore login access for the publisher + its agents */}
+                          <Button
+                            variant="ghost" size="sm"
+                            className={`text-xs h-7 ${p.isActive ? 'text-amber-600 hover:text-amber-700 hover:bg-amber-50' : 'text-green-600 hover:text-green-700 hover:bg-green-50'}`}
+                            onClick={() => {
+                              const msg = p.isActive
+                                ? `Revoke access for "${p.name}"? They and all their agents will be unable to log in.`
+                                : `Restore access for "${p.name}"?`;
+                              if (confirm(msg)) toggleMutation.mutate(p._id);
+                            }}
+                          >
+                            {p.isActive ? <><Ban className="h-3 w-3 mr-1" />Revoke</> : <><Power className="h-3 w-3 mr-1" />Restore</>}
+                          </Button>
+                          <Button
+                            variant="ghost" size="sm"
+                            className="h-7 w-7 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            title="Delete publisher"
+                            onClick={() => { if (confirm(`Delete publisher "${p.name}" permanently? This cannot be undone.`)) deleteMutation.mutate(p._id); }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         </div>
                       </td>
