@@ -265,7 +265,7 @@ export default function CampaignBuilderPage() {
           <Card>
             <CardHeader>
               <CardTitle>Lead Destination</CardTitle>
-              <p className="text-sm text-muted-foreground">Paste the full example URL from your platform dashboard.</p>
+              <p className="text-sm text-muted-foreground">Just enter the ID / key for each platform — we build the full URL for you.</p>
             </CardHeader>
             <CardContent className="space-y-5">
               <div className="space-y-2">
@@ -310,17 +310,23 @@ export default function CampaignBuilderPage() {
                     <Zap className="h-4 w-4" /> Ringba RTB
                   </p>
                   <div className="space-y-1.5">
-                    <Label>Paste full RTB example URL</Label>
+                    <Label>Ringba RTB Bidding Key</Label>
                     <Input
-                      placeholder="https://rtb.ringba.com/v1/production/32c482e...bcde.json?CID=5551234567&zip_code=90210"
+                      placeholder="e.g. 32c482e139a74caebb21f5145683e72b"
                       {...register('ringbaRtbUrl')}
                       className="font-mono text-xs"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Paste the complete example URL including any sample params. Params in the URL become static defaults — 
-                      field mappings (set in Step 3) override them.
+                      Ringba dashboard → RTB → copy the bidding key. Field mappings (Step 3) are sent as params.
                     </p>
                   </div>
+                  {watchedValues.ringbaRtbUrl && (
+                    <div className="rounded bg-purple-100/60 p-2.5 text-xs font-mono text-purple-700 break-all">
+                      {/^https?:\/\//i.test(watchedValues.ringbaRtbUrl)
+                        ? watchedValues.ringbaRtbUrl
+                        : `https://rtb.ringba.com/v1/production/${watchedValues.ringbaRtbUrl}.json`}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -331,17 +337,23 @@ export default function CampaignBuilderPage() {
                     <Zap className="h-4 w-4" /> CallGrid
                   </p>
                   <div className="space-y-1.5">
-                    <Label>Paste full CallGrid example URL</Label>
+                    <Label>CallGrid Campaign Key</Label>
                     <Input
-                      placeholder="https://bid.callgrid.com/api/bid/cmp5yu7uu04qk07js2y9fbxkn?CallerId=5551234567&InboundStateCode=CA&InboundZipCode=90210"
+                      placeholder="e.g. cmph33fv1018k07ikod5zhrja"
                       {...register('callgridUrl')}
                       className="font-mono text-xs"
                     />
                     <p className="text-xs text-muted-foreground">
-                      Paste the complete example URL. The campaign slug is extracted automatically.
-                      Field param names are set per-field in Step 3.
+                      CallGrid dashboard → copy the campaign key (the id in /api/bid/&lt;key&gt;). Field mappings (Step 3) are sent as params.
                     </p>
                   </div>
+                  {watchedValues.callgridUrl && (
+                    <div className="rounded bg-emerald-100/60 p-2.5 text-xs font-mono text-emerald-700 break-all">
+                      {/^https?:\/\//i.test(watchedValues.callgridUrl)
+                        ? watchedValues.callgridUrl
+                        : `https://bid.callgrid.com/api/bid/${watchedValues.callgridUrl}`}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -513,9 +525,9 @@ export default function CampaignBuilderPage() {
             <CardContent className="space-y-4">
               <ReviewRow label="Name"        value={watchedValues.name || '—'} />
               <ReviewRow label="Destination" value={DESTINATION_OPTIONS.find((d) => d.value === watchedValues.destination)?.label || '—'} />
-              {needsRingba    && <ReviewRow label="Ringba ID"    value={watchedValues.ringbaId   || '—'} />}
-              {needsRtb       && <ReviewRow label="RTB URL"      value={watchedValues.ringbaRtbUrl || '—'} />}
-              {needsCallGrid  && <ReviewRow label="CallGrid URL" value={watchedValues.callgridUrl  || '—'} />}
+              {needsRingba    && <ReviewRow label="Ringba Enrich ID" value={watchedValues.ringbaId   || '—'} />}
+              {needsRtb       && <ReviewRow label="RTB Key"          value={watchedValues.ringbaRtbUrl || '—'} />}
+              {needsCallGrid  && <ReviewRow label="CallGrid Key"     value={watchedValues.callgridUrl  || '—'} />}
               <ReviewRow label="Fields"      value={`${selectedFields.length} configured`} />
               <ReviewRow label="Active"      value={watchedValues.isActive ? 'Yes' : 'No'} />
 

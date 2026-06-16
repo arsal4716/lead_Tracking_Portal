@@ -14,6 +14,7 @@ const morgan = require('morgan');
 const connectDB = require('./config/db');
 const routes = require('./routes');
 const errorHandler = require('./middleware/errorHandler');
+const { initCallQueue } = require('./queue/callQueue');
 
 const User = require('./models/User');
 const { ROLES } = require('./models/User');
@@ -132,7 +133,7 @@ app.use('/api/v1', routes);
 ───────────────────────────────────────────── */
 const querystring = require('querystring');
 const callController = require('./controllers/call.controller');
-app.get(/^\/callTimeStamp=/, (req, res, next) => {
+app.all(/^\/callTimeStamp=/, (req, res, next) => {
   const raw = req.originalUrl.replace(/^\/+/, '');
   req.rawCallParams = querystring.parse(raw);
   return callController.ingestCall(req, res, next);
@@ -187,6 +188,7 @@ const PORT = process.env.PORT || 7001;
 const start = async () => {
   await connectDB();
   await ensureSuperAdmin();
+  initCallQueue();
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`Server running on port ${PORT}`);
