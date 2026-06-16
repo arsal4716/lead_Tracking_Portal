@@ -6,6 +6,30 @@ const { sendSuccess } = require('../utils/response');
 const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 
+// ── Public-facing response sanitizer ────────────────────────────────────────────
+// External publishers / call centers must NEVER see the vendor endpoint, the
+// final URL, the params we send, or our keys — only success + the vendor's own
+// response. (Super admins see everything in the authenticated internal UI.)
+const buildPublicResponse = (result) => {
+  const dests = result.destinationResults || {};
+  const keys = Object.keys(dests);
+
+  let response;
+  if (keys.length === 1) {
+    response = dests[keys[0]]?.response ?? null;
+  } else if (keys.length > 1) {
+    response = {};
+    for (const k of keys) response[k] = dests[k]?.response ?? null;
+  } else {
+    response = null;
+  }
+
+  return {
+    success: result.status === 'sent',
+    response,
+  };
+};
+
 exports.ingestLead = catchAsync(async (req, res, next) => {
   const { campaignId, data } = req.body;
   const publisher = req.publisher;
@@ -27,7 +51,7 @@ exports.ingestLead = catchAsync(async (req, res, next) => {
     userAgent: req.headers['user-agent'],
   });
 
-  sendSuccess(res, result, 201);
+  res.status(201).json(buildPublicResponse(result));
 });
 
 exports.enrichEndpoint = catchAsync(async (req, res, next) => {
@@ -45,5 +69,5 @@ exports.enrichEndpoint = catchAsync(async (req, res, next) => {
     userAgent: req.headers['user-agent'],
   });
 
-  res.status(200).json({ status: 'success', ...result });
+  res.status(200).json(buildPublicResponse(result));
 });

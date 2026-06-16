@@ -9,6 +9,26 @@ const catchAsync = require('../utils/catchAsync');
 const audit      = require('../utils/audit');
 const { buildDateFilter } = require('../utils/estDate');
 
+// Remove vendor request internals (final URL, params, key) for non-super-admins.
+// Super admins keep the full enrichment mapping; everyone else sees only the
+// outcome (sent/provider/error) and the vendor response.
+const stripVendorInternals = (sub) => {
+  const dr = sub?.destinationResults;
+  if (dr && typeof dr === 'object') {
+    const cleaned = {};
+    for (const [k, v] of Object.entries(dr)) {
+      if (v && typeof v === 'object') {
+        const { request, ...rest } = v; // drop request (url/params/uniqueKey/fullUrl)
+        cleaned[k] = rest;
+      } else {
+        cleaned[k] = v;
+      }
+    }
+    sub.destinationResults = cleaned;
+  }
+  return sub;
+};
+
 // POST /submissions
 exports.submit = catchAsync(async (req, res) => {
   const { campaignId, data } = req.body;
@@ -83,7 +103,11 @@ exports.getAll = catchAsync(async (req, res) => {
     Submission.countDocuments(filter),
   ]);
 
-  sendPaginated(res, submissions, total, page, limit);
+  const visible = req.user.role === ROLES.SUPER_ADMIN
+    ? submissions
+    : submissions.map(stripVendorInternals);
+
+  sendPaginated(res, visible, total, page, limit);
 });
 
 // GET /submissions/:id
@@ -100,6 +124,7 @@ exports.getOne = catchAsync(async (req, res, next) => {
     .lean();
 
   if (!submission) return next(new AppError('Submission not found.', 404));
+  if (req.user.role !== ROLES.SUPER_ADMIN) stripVendorInternals(submission);
   sendSuccess(res, { submission });
 });
 
