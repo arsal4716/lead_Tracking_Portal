@@ -121,21 +121,21 @@ const checkCallBeforeLead = async (phoneNormalized, publisherId, campaignId) => 
 };
 
 // ── Compliance validation ──────────────────────────────────────────────────────
+// Runs ONLY when the campaign enables a check. Never blocks the submission — the
+// outcome is recorded and forwarded as token_valid=yes/no on the API call.
 const runValidation = async (campaign, data) => {
   const result = { jornaya: { enabled: false }, trustedForm: { enabled: false } };
 
   if (campaign.jornayaEnabled) {
-    const lac     = data.jornaya_leadid || data.leadid_token || data.universal_leadid;
-    const jResult = await validateJornaya(lac);
+    const token   = data.jornaya_leadid || data.leadid_token || data.universal_leadid;
+    const jResult = await validateJornaya(token);
     result.jornaya = { enabled: true, valid: jResult.valid, transId: jResult.transId, message: jResult.message };
-    if (!jResult.valid) throw new AppError(`Jornaya validation failed: ${jResult.message}`, 422);
   }
 
   if (campaign.trustedFormEnabled) {
     const certUrl  = data.xxTrustedFormCertUrl || data.trusted_form_cert_url;
     const tfResult = await validateTrustedForm(certUrl);
     result.trustedForm = { enabled: true, valid: tfResult.valid, certId: tfResult.certId, reason: tfResult.reason };
-    if (!tfResult.valid) throw new AppError(`TrustedForm validation failed: ${tfResult.reason}`, 422);
   }
 
   return result;
@@ -167,6 +167,12 @@ const processSubmission = async ({
   const { isDuplicate, attemptCount } = await checkDuplicate(phoneNormalized, effectivePublisherId);
   const validation      = await runValidation(campaign, rawData);
   const callBeforeLead  = await checkCallBeforeLead(phoneNormalized, effectivePublisherId, campaign._id);
+
+  // When Jornaya is enabled, forward the result as token_valid=yes/no.
+  // When it's NOT enabled, we never add this tag.
+  if (validation.jornaya.enabled) {
+    rawData.token_valid = validation.jornaya.valid ? 'yes' : 'no';
+  }
 
   const submission = await Submission.create({
     publisher:   effectivePublisherId,

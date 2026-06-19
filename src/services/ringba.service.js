@@ -122,6 +122,15 @@ const buildParams = (campaign, submissionData, dest, agentName) => {
     console.log(`[${dest}] FIELD [${field.key}] → "${paramKey}" = "${finalVal}"`);
   }
 
+  // Compliance: forward token_valid=yes/no ONLY when Jornaya is enabled on the
+  // campaign. When disabled, the tag is never added.
+  if (campaign.jornayaEnabled) {
+    const tv = submissionData.token_valid;
+    if (tv !== undefined && tv !== null && tv !== '') {
+      params['token_valid'] = String(tv);
+    }
+  }
+
   // Inject logged-in agent's name into every API call
   if (agentName) {
     params['agent_name'] = agentName;
