@@ -32,6 +32,11 @@ const submissionSchema = new mongoose.Schema(
     // Fraud: a tracked call for this caller arrived BEFORE this lead was submitted.
     callBeforeLead: { type: Boolean, default: false },
 
+    // CallGrid availability: agentAvailable=true when response.code===1000.
+    // responseCode is the raw CallGrid code (null for Ringba — no code-1000 gating).
+    agentAvailable: { type: Boolean },
+    responseCode:   { type: Number },
+
     jornaya: {
       enabled: { type: Boolean, default: false },
       valid:   { type: Boolean },

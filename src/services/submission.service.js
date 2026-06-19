@@ -207,7 +207,7 @@ const processSubmission = async ({
   };
 
   // Route to destination(s) through the unified integration layer
-  const { sent, results, provider, providerLabel } = await IntegrationService.sendLead(
+  const { sent, results, provider, providerLabel, availability } = await IntegrationService.sendLead(
     campaign, enrichedData, { agentName }
   );
 
@@ -215,6 +215,8 @@ const processSubmission = async ({
     ringba:             results.ringba     || { sent: false },
     destinationResults: results,
     status:             sent ? 'sent' : 'failed',
+    agentAvailable:     availability.agentAvailable,
+    responseCode:       availability.code,
   });
 
   return {
@@ -226,6 +228,7 @@ const processSubmission = async ({
     callBeforeLead,
     provider,
     providerLabel,
+    availability,
     ringba:             results.ringba || null,
     destinationResults: results,
     validation,

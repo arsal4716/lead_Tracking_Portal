@@ -24,6 +24,48 @@ const PROVIDER_LABELS = {
   ringba_rtb_and_callgrid:     'Ringba RTB + CallGrid',
 };
 
+/**
+ * Interpret vendor results into a call-routing decision.
+ *
+ * CallGrid: response.code === 1000 means an agent/target IS available → send the
+ * call. Any other code means no agent → do NOT send (retry).
+ * Ringba (regular/RTB): returns only "status: ok" — there is no code-1000 signal,
+ * so a successful send simply means accepted (no availability gating).
+ */
+const interpretAvailability = (results = {}) => {
+  const cg = results.callgrid;
+  if (cg) {
+    const resp = (cg.response && typeof cg.response === 'object') ? cg.response : {};
+    const code = resp.code;
+    const available = !!cg.sent && code === 1000;
+    return {
+      provider:       'callgrid',
+      agentAvailable: available,
+      code:           code !== undefined ? code : null,
+      phoneNumber:    resp.phoneNumber || null,
+      message: available
+        ? `Agent available — SEND THE CALL${resp.phoneNumber ? ` to ${resp.phoneNumber}` : ''}.`
+        : 'No agents available right now — DO NOT send the call. Ping again in a moment.',
+    };
+  }
+
+  const rb = results.ringba || results.ringbaRtb;
+  if (rb) {
+    const available = !!rb.sent;
+    return {
+      provider:       rb.provider || 'ringba',
+      agentAvailable: available,
+      code:           null, // Ringba has no code-1000 gating
+      phoneNumber:    null,
+      message: available
+        ? 'Lead accepted — send the call.'
+        : 'Lead not accepted — do not send the call.',
+    };
+  }
+
+  return { provider: null, agentAvailable: false, code: null, phoneNumber: null, message: 'No destination configured.' };
+};
+
 const IntegrationService = {
   /**
    * Route a lead to every destination configured on the campaign.
@@ -45,6 +87,7 @@ const IntegrationService = {
       provider,
       providerLabel: PROVIDER_LABELS[provider] || provider,
       results,
+      availability: interpretAvailability(results),
     };
   },
 
@@ -53,4 +96,4 @@ const IntegrationService = {
   },
 };
 
-module.exports = { IntegrationService, PROVIDER_LABELS };
+module.exports = { IntegrationService, PROVIDER_LABELS, interpretAvailability };

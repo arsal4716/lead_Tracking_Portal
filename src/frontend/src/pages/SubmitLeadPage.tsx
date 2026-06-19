@@ -6,9 +6,33 @@ import { campaignService, submissionService } from '@/services';
 import { Button } from '@/components/ui/button';
 import { Input, Label, Textarea, Card, CardContent, CardHeader, CardTitle } from '@/components/ui/index';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/index';
-import { Loader2, CheckCircle, Phone } from 'lucide-react';
+import { Loader2, Phone, PhoneCall, PhoneOff, RefreshCw } from 'lucide-react';
 import type { Campaign, CampaignField } from '@/types';
 import { cn } from '@/lib/utils';
+
+// Max times an agent may re-ping the system before we tell them to stop.
+const MAX_PINGS = 8;
+
+// Decide whether to send the call. CallGrid code 1000 = agent available.
+// Ringba returns only "status: ok" (sent) — no code gating.
+const deriveAvailability = (r: any) => {
+  if (r?.availability) return r.availability;
+  const dr = r?.destinationResults || {};
+  const cg = dr.callgrid;
+  if (cg) {
+    const code = cg.response?.code;
+    const available = !!cg.sent && code === 1000;
+    return {
+      agentAvailable: available,
+      code: code ?? null,
+      phoneNumber: cg.response?.phoneNumber || null,
+      message: available ? 'Agent available — SEND THE CALL.' : 'No agents available — do not send the call.',
+    };
+  }
+  const rb = dr.ringba || dr.ringbaRtb;
+  if (rb) return { agentAvailable: !!rb.sent, code: null, phoneNumber: null, message: rb.sent ? 'Lead accepted — send the call.' : 'Not accepted.' };
+  return { agentAvailable: r?.status === 'sent', code: null, phoneNumber: null, message: '' };
+};
 
 // ── Phone cleaning ──────────────────────────────────────────────────────────────
 const cleanPhone = (raw: string): string => {
@@ -98,6 +122,8 @@ export default function SubmitLeadPage() {
   const [selectedCampaignId, setSelectedCampaignId] = useState('');
   const [submitted, setSubmitted] = useState(false);
   const [result,    setResult]    = useState<any>(null);
+  const [pingCount, setPingCount] = useState(0);
+  const [lastData,  setLastData]  = useState<Record<string, unknown> | null>(null);
 
   const { data: campaignsData } = useQuery({
     queryKey: ['my-campaigns'],
@@ -292,26 +318,61 @@ export default function SubmitLeadPage() {
     );
   };
 
-  // ── Success screen ───────────────────────────────────────────────────────────
+  // ── Re-ping: re-send the same lead to check availability again ─────────────────
+  const rePing = () => {
+    if (!lastData) return;
+    setPingCount((c) => c + 1);
+    submitMutation.mutate(lastData);
+  };
+
+  const resetForm = () => {
+    setSubmitted(false); setResult(null); setPingCount(0); setLastData(null); reset();
+  };
+
+  // ── Result screen — agent availability + call decision ─────────────────────────
   if (submitted && result) {
+    const avail     = deriveAvailability(result);
+    const available = !!avail.agentAvailable;
+    const pingsLeft = MAX_PINGS - pingCount;
+    const exhausted = pingsLeft <= 0;
+
     return (
       <div className="page-container max-w-lg">
-        <Card className="shadow-md">
-          <CardContent className="py-12 text-center space-y-4">
-            <div className="h-16 w-16 rounded-full bg-emerald-100 flex items-center justify-center mx-auto">
-              <CheckCircle className="h-8 w-8 text-emerald-500" />
-            </div>
-            <h2 className="text-xl font-semibold">Lead Submitted!</h2>
-            <p className="text-sm text-muted-foreground">
-              {result.status === 'sent' ? 'Lead sent successfully.' : 'Lead saved — delivery failed.'}
-            </p>
-            <div className="p-4 rounded-xl bg-slate-50 border text-sm text-left space-y-2.5">
+        <Card className="shadow-md overflow-hidden">
+          {/* Availability banner — green = send, flashing red = don't send */}
+          <div className={cn('p-7 text-center text-white', available ? 'bg-emerald-500' : 'bg-red-600 animate-pulse')}>
+            {available ? (
+              <>
+                <PhoneCall className="h-10 w-10 mx-auto mb-2" />
+                <h2 className="text-2xl font-extrabold tracking-tight">AGENT AVAILABLE</h2>
+                <p className="mt-1 text-emerald-50">Send the call now{avail.phoneNumber ? ' to:' : '.'}</p>
+                {avail.phoneNumber && <p className="mt-1 text-2xl font-mono font-bold">{avail.phoneNumber}</p>}
+              </>
+            ) : (
+              <>
+                <PhoneOff className="h-10 w-10 mx-auto mb-2" />
+                <h2 className="text-2xl font-extrabold tracking-tight">NO AGENTS AVAILABLE</h2>
+                <p className="mt-1 text-red-50 font-medium">DO NOT send the call.</p>
+              </>
+            )}
+          </div>
+
+          <CardContent className="py-6 space-y-4">
+            <p className="text-sm text-center text-muted-foreground">{avail.message}</p>
+
+            <div className="p-4 rounded-xl bg-slate-50 border text-sm space-y-2.5">
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Submission ID</span>
                 <code className="text-xs bg-muted px-1.5 py-0.5 rounded">{result.submissionId}</code>
               </div>
+              {avail.code != null && (
+                <div className="flex justify-between">
+                  <span className="text-muted-foreground">CallGrid code</span>
+                  <span className="font-semibold">{avail.code}{avail.code === 1000 ? ' (available)' : ' (no agent)'}</span>
+                </div>
+              )}
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Status</span>
+                <span className="text-muted-foreground">Delivery</span>
                 <span className={cn('font-semibold', result.status === 'sent' ? 'text-emerald-600' : 'text-red-500')}>
                   {result.status === 'sent' ? '✓ Sent' : '✗ Failed'}
                 </span>
@@ -319,13 +380,30 @@ export default function SubmitLeadPage() {
               {result.isDuplicate && (
                 <div className="flex justify-between">
                   <span className="text-muted-foreground">Note</span>
-                  <span className="text-amber-600 font-medium">Duplicate phone</span>
+                  <span className="text-amber-600 font-medium">Duplicate · attempt {result.attemptCount ?? '—'}</span>
                 </div>
               )}
             </div>
-            <div className="flex gap-3 justify-center pt-2">
-              <Button onClick={() => { setSubmitted(false); setResult(null); reset(); }}>Submit Another</Button>
-              <Button variant="outline" onClick={() => window.location.href = '/submissions'}>View Submissions</Button>
+
+            {/* Keep pinging until an agent frees up (capped) */}
+            {!available && !exhausted && (
+              <div className="space-y-1.5">
+                <Button onClick={rePing} loading={submitMutation.isPending} size="lg"
+                  className="w-full bg-red-600 hover:bg-red-500 text-white">
+                  <RefreshCw className="h-4 w-4 mr-2" /> Ping again ({pingsLeft} left)
+                </Button>
+                <p className="text-xs text-center text-muted-foreground">Keep pinging the system until an agent becomes available.</p>
+              </div>
+            )}
+            {!available && exhausted && (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-center text-red-700">
+                No agents available after {MAX_PINGS} attempts. Bye 👋 — please try again later.
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-center pt-1">
+              <Button variant="outline" onClick={resetForm}>Submit Another</Button>
+              <Button variant="ghost" onClick={() => window.location.href = '/submissions'}>View Submissions</Button>
             </div>
           </CardContent>
         </Card>
@@ -380,7 +458,7 @@ export default function SubmitLeadPage() {
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : campaign && visibleFields.length > 0 ? (
-          <form onSubmit={handleSubmit((d) => submitMutation.mutate(d as Record<string, unknown>))}>
+          <form onSubmit={handleSubmit((d) => { setLastData(d as Record<string, unknown>); setPingCount(0); submitMutation.mutate(d as Record<string, unknown>); })}>
             <Card className="shadow-sm">
               <CardHeader className="pb-2 pt-5 px-6">
                 <CardTitle className="text-base font-semibold">{campaign.name}</CardTitle>

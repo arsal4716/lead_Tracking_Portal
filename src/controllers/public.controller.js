@@ -24,8 +24,17 @@ const buildPublicResponse = (result) => {
     response = null;
   }
 
+  const a = result.availability || {};
+
   return {
-    success: result.status === 'sent',
+    success:        result.status === 'sent',
+    // Call-routing decision (CallGrid code 1000 = agent available; Ringba = accepted)
+    agentAvailable: a.agentAvailable ?? false,
+    sendCall:       a.agentAvailable ?? false,
+    code:           a.code ?? null,
+    phoneNumber:    a.phoneNumber ?? null,
+    message:        a.message || (result.status === 'sent' ? 'Accepted.' : 'Not accepted.'),
+    instructions:   'If sendCall is true, route the call to phoneNumber. For CallGrid, response.code 1000 = agent available; any other code = no agent (retry). Ringba returns status: ok with no code.',
     response,
   };
 };
