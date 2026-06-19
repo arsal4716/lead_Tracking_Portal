@@ -396,8 +396,9 @@ export default function SubmitLeadPage() {
               </div>
             )}
             {!available && exhausted && (
-              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-center text-red-700">
-                No agents available after {MAX_PINGS} attempts. Bye 👋 — please try again later.
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-center text-red-700 space-y-1">
+                <p className="font-semibold">No agents available at the moment. Please call back later.</p>
+                <p className="text-xs text-red-600">Retries are blocked for this number ({MAX_PINGS} attempts used). You can still submit new leads below.</p>
               </div>
             )}
 
