@@ -44,6 +44,10 @@ exports.submit = catchAsync(async (req, res) => {
     userAgent:   req.headers['user-agent'],
   });
 
+  // Agents keep the vendor response + availability decision, but not the
+  // vendor request internals (final URL / params / key) — super_admin only.
+  if (req.user.role !== ROLES.SUPER_ADMIN) stripVendorInternals(result);
+
   sendSuccess(res, result, 201);
 });
 
