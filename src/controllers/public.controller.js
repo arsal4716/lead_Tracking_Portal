@@ -7,35 +7,29 @@ const AppError = require('../utils/AppError');
 const catchAsync = require('../utils/catchAsync');
 
 // ── Public-facing response sanitizer ────────────────────────────────────────────
-// External publishers / call centers must NEVER see the vendor endpoint, the
-// final URL, the params we send, or our keys — only success + the vendor's own
-// response. (Super admins see everything in the authenticated internal UI.)
+// External publishers / call centers must NEVER see vendor internals (which
+// vendor, the endpoint, the URL, our keys, the raw vendor body, or Ringba's
+// "status: ok"). They only get the call-routing decision.
+//
+// If CallGrid is integrated: agentAvailable is driven by code 1000. Any other
+// code → retry. (Ringba-only campaigns: accepted → send, no retry, nothing leaked.)
+const MAX_RETRIES = 8;
+
 const buildPublicResponse = (result) => {
-  const dests = result.destinationResults || {};
-  const keys = Object.keys(dests);
-
-  let response;
-  if (keys.length === 1) {
-    response = dests[keys[0]]?.response ?? null;
-  } else if (keys.length > 1) {
-    response = {};
-    for (const k of keys) response[k] = dests[k]?.response ?? null;
-  } else {
-    response = null;
-  }
-
   const a = result.availability || {};
+  const available = !!a.agentAvailable;
 
   return {
     success:        result.status === 'sent',
-    // Call-routing decision (CallGrid code 1000 = agent available; Ringba = accepted)
-    agentAvailable: a.agentAvailable ?? false,
-    sendCall:       a.agentAvailable ?? false,
-    code:           a.code ?? null,
-    phoneNumber:    a.phoneNumber ?? null,
-    message:        a.message || (result.status === 'sent' ? 'Accepted.' : 'Not accepted.'),
-    instructions:   'If sendCall is true, route the call to phoneNumber. For CallGrid, response.code 1000 = agent available; any other code = no agent (retry). Ringba returns status: ok with no code.',
-    response,
+    agentAvailable: available,
+    sendCall:       available,
+    retry:          !available,
+    maxRetries:     MAX_RETRIES,
+    phoneNumber:    available ? (a.phoneNumber || null) : null,
+    message: available
+      ? `Agent available — send the call${a.phoneNumber ? ` to ${a.phoneNumber}` : ''}.`
+      : `No agents available at the moment. Please retry (up to ${MAX_RETRIES} attempts); if still unavailable, call back later.`,
+    instructions: 'If sendCall is true, route the call to phoneNumber. If retry is true, re-send this request to check again — up to maxRetries per lead; if still unavailable, stop and try later.',
   };
 };
 
