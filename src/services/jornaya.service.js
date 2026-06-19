@@ -2,37 +2,53 @@
 
 const axios = require('axios');
 
-const validateJornaya = async (lac) => {
-  if (!lac) {
-    return { valid: false, message: 'Jornaya LAC token missing', transId: null, raw: null };
+/**
+ * Authenticate a lead's Jornaya (LeadiD) token.
+ *
+ * GET https://api.leadid.com/Authenticate?lac=<ACCOUNT_CODE>&id=<LEAD_TOKEN>
+ *   - lac = your Jornaya account code (secret, from env)
+ *   - id  = the lead's universal LeadiD token (from the form)
+ *
+ * Response shape:
+ *   { "authenticate": { "authentic": 0|1, "reason": N, "token": "<id>" }, "transid": "..." }
+ * Authentic only when authenticate.authentic === 1.
+ *
+ * Never throws — returns { valid, transId, message, raw } so the caller can
+ * forward token_valid=yes/no instead of blocking the submission.
+ */
+const validateJornaya = async (token) => {
+  if (!token) {
+    return { valid: false, message: 'Jornaya token missing', transId: null, raw: null };
+  }
+
+  const accountCode = process.env.JORNAYA_LAC || process.env.JORNAYA_API_ID;
+  if (!accountCode) {
+    return { valid: false, message: 'Jornaya account code (JORNAYA_LAC) not configured', transId: null, raw: null };
   }
 
   try {
-    const url = `https://api.leadid.com/Authenticate`;
-    const response = await axios.get(url, {
-      params: {
-        lac,
-        id: process.env.JORNAYA_API_ID,
-      },
+    const response = await axios.get('https://api.leadid.com/Authenticate', {
+      params: { lac: accountCode, id: token },
       timeout: 8000,
     });
 
-    const data = response.data;
-    const isValid = data?.authentic === 1 || data?.authentic === '1';
+    const data = response.data || {};
+    const auth = data.authenticate || {};
+    const isValid = auth.authentic === 1 || auth.authentic === '1';
 
     return {
-      valid: isValid,
-      transId: data?.transId || data?.transaction_id || null,
-      message: isValid ? 'Authenticated' : (data?.message || 'Authentication failed'),
-      raw: data,
+      valid:   isValid,
+      transId: data.transid || data.transId || null,
+      message: isValid ? 'Authenticated' : `Not authentic (reason ${auth.reason ?? 'unknown'})`,
+      raw:     data,
     };
   } catch (err) {
-    console.error('Jornaya API error:', err.message);
+    console.error('Jornaya API error:', err.response?.data || err.message);
     return {
-      valid: false,
+      valid:   false,
       transId: null,
       message: `Jornaya service error: ${err.message}`,
-      raw: null,
+      raw:     err.response?.data || null,
     };
   }
 };
