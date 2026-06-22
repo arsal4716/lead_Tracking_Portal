@@ -22,7 +22,10 @@ exports.getAll = catchAsync(async (req, res) => {
 
   if (req.query.role)           filter.role = req.query.role;
   if (req.query.approvalStatus) filter.approvalStatus = req.query.approvalStatus;
-  if (req.query.search)         filter.name = { $regex: req.query.search, $options: 'i' };
+  if (req.query.search) {
+    const rx = { $regex: req.query.search, $options: 'i' };
+    filter.$or = [{ name: rx }, { email: rx }];
+  }
 
   const [users, total] = await Promise.all([
     User.find(filter).populate('publisher', 'name').sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),

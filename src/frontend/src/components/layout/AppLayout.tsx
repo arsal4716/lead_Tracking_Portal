@@ -1,4 +1,5 @@
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services';
 import { toast } from 'sonner';
@@ -32,6 +33,7 @@ const navItems: NavItem[] = [
 export function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { user, logout } = useAuthStore();
 
   const handleLogout = async () => {
@@ -39,6 +41,7 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
       await authService.logout();
     } catch {}
     logout();
+    queryClient.clear(); // wipe cached data so the next user starts clean
     navigate('/login');
     toast.success('Logged out.');
   };
