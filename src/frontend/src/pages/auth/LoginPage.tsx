@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { useAuthStore } from '@/stores/authStore';
 import { authService } from '@/services';
@@ -19,6 +20,7 @@ type FormData = z.infer<typeof schema>;
 
 export default function LoginPage() {
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const { setAuth } = useAuthStore();
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -31,6 +33,9 @@ export default function LoginPage() {
     try {
       const res = await authService.login(data.email, data.password);
       const { user, accessToken } = res.data.data;
+      // Drop any cached data from a previous session so one user never sees
+      // another user's records flash before the refetch.
+      queryClient.clear();
       setAuth(user, accessToken);
       toast.success(`Welcome back, ${user.name}!`);
       navigate('/dashboard');

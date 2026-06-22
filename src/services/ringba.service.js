@@ -1,6 +1,14 @@
 'use strict';
 
 const axios = require('axios');
+const http  = require('http');
+const https = require('https');
+
+// Keep-alive agents so high-volume vendor calls reuse TCP/TLS connections
+// instead of re-handshaking on every lead (big win at 100+ concurrent).
+const httpAgent  = new http.Agent({ keepAlive: true, maxSockets: 200 });
+const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 200 });
+const httpClient = axios.create({ timeout: 10000, httpAgent, httpsAgent });
 
 // ── Phone cleaning ─────────────────────────────────────────────────────────────
 const cleanPhone = (raw) => {
@@ -149,7 +157,7 @@ const sendToRingba = async (ringbaId, params) => {
 
   try {
     console.log('[Ringba Regular] →', request.fullUrl);
-    const response = await axios.get(url, { params, timeout: 10000 });
+    const response = await httpClient.get(url, { params });
     console.log('[Ringba Regular] ←', response.data);
     return { sent: true, sentAt: new Date(), provider: 'ringba_regular', request, response: response.data, error: null };
   } catch (err) {
@@ -173,7 +181,7 @@ const sendToRingbaRtb = async (campaign, submissionData, agentName) => {
 
   try {
     console.log('[Ringba RTB] →', request.fullUrl);
-    const response = await axios.get(base, { params: finalParams, timeout: 10000 });
+    const response = await httpClient.get(base, { params: finalParams });
     console.log('[Ringba RTB] ←', response.data);
     return { sent: true, sentAt: new Date(), provider: 'ringba_rtb', request, response: response.data, error: null };
   } catch (err) {
@@ -203,7 +211,7 @@ const sendToCallGrid = async (campaign, submissionData, agentName) => {
 
   try {
     console.log('[CallGrid] →', request.fullUrl);
-    const response = await axios.get(base, { params: finalParams, timeout: 10000 });
+    const response = await httpClient.get(base, { params: finalParams });
     console.log('[CallGrid] ←', response.data);
     return { sent: true, sentAt: new Date(), provider: 'callgrid', request, response: response.data, error: null };
   } catch (err) {

@@ -64,26 +64,63 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(mongoSanitize());
 app.set('trust proxy', 1);
+
+// Body parsing MUST run before rate limiting (auth limiter keys on req.body.email)
+// and before mongoSanitize (which sanitizes the parsed body).
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true }));
+app.use(mongoSanitize());
 
 /* ─────────────────────────────────────────────
    RATE LIMITING
+   Keyed by authenticated user (Bearer token) when present, else by IP — so a
+   whole call center behind ONE shared NAT IP does not share a single budget
+   (which previously locked everyone out for minutes once 100 reqs were hit).
 ───────────────────────────────────────────── */
-const limiter = rateLimit({
-  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 15 * 60 * 1000,
-  max: parseInt(process.env.RATE_LIMIT_MAX) || 100,
+const keyByUserOrIp = (req /*, res */) => {
+  const auth = req.headers.authorization;
+  if (auth && auth.startsWith('Bearer ')) return `tok:${auth.slice(7)}`;
+  return `ip:${req.ip || 'unknown'}`;
+};
+
+// General authenticated API traffic — generous, per-minute, per-user.
+const apiLimiter = rateLimit({
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS) || 60 * 1000,
+  max:      parseInt(process.env.RATE_LIMIT_MAX) || 600, // per user/IP per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: keyByUserOrIp,
+  // Public ingestion + health have their own handling.
+  skip: (req) => {
+    const u = req.originalUrl || '';
+    return u === '/health' || u.startsWith('/api/v1/public');
+  },
+});
+
+// Public lead ingestion — high throughput so 100+ concurrent posts aren't blocked.
+const publicLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max:      parseInt(process.env.PUBLIC_RATE_LIMIT_MAX) || 2000, // per IP per minute
   standardHeaders: true,
   legacyHeaders: false,
 });
 
-const apiLimiter = rateLimit({
-  windowMs: 60 * 1000,
-  max: 300,
+// Brute-force protection on auth — counts only FAILED attempts, keyed by IP+email
+// so a shared office IP can't be locked out by one bad actor.
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max:      parseInt(process.env.AUTH_RATE_LIMIT_MAX) || 30,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skipSuccessfulRequests: true,
+  keyGenerator: (req) => `auth:${req.ip}:${(req.body && req.body.email) || ''}`,
 });
 
-app.use('/api/', limiter);
-app.use('/api/public/', apiLimiter);
+app.use('/api/v1/public', publicLimiter);
+app.use('/api/v1/auth/login', authLimiter);
+app.use('/api/v1/auth/register', authLimiter);
+app.use('/api/', apiLimiter);
 
 /* ─────────────────────────────────────────────
    CORS (ONLY DEV OR CROSS CLIENT USE)
@@ -100,11 +137,8 @@ if (isDev) {
 }
 
 /* ─────────────────────────────────────────────
-   BODY + LOGGING
+   LOGGING
 ───────────────────────────────────────────── */
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
-
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan(isDev ? 'dev' : 'combined'));
 }

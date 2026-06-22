@@ -128,7 +128,7 @@ export default function UsersPage() {
       <div className="flex gap-3">
         <div className="relative flex-1 max-w-xs">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-          <Input placeholder="Search users..." className="pl-9" value={search}
+          <Input placeholder="Search by name or email..." className="pl-9" value={search}
             onChange={(e) => { setSearch(e.target.value); setPage(1); }} />
         </div>
         <Select value={roleFilter} onValueChange={(v) => { setRoleFilter(v === 'all' ? '' : v); setPage(1); }}>
