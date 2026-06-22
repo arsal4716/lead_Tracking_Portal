@@ -186,6 +186,9 @@ export default function CampaignBuilderPage() {
     );
 
   const onSubmit = (data: FormData) => {
+    // Only ever save from the Review step. Prevents Enter-key / early submits
+    // from creating the campaign before the user reviews it.
+    if (step !== 5) return;
     saveMutation.mutate({
       ...data,
       fields: selectedFields.map((sf, idx) => ({
