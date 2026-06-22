@@ -175,6 +175,11 @@ export default function CampaignsPage() {
 
                       <td className="px-4 py-3">
                         <p className="font-medium">{campaign.name}</p>
+                        {campaign.description && (
+                          <p className="text-xs text-slate-500 max-w-[240px] truncate" title={campaign.description}>
+                            {campaign.description}
+                          </p>
+                        )}
                         <p className="text-xs text-muted-foreground">{formatDate(campaign.createdAt)}</p>
                       </td>
 
