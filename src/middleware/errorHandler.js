@@ -4,8 +4,9 @@ const AppError = require('../utils/AppError');
 
 const handleCastErrorDB = (err) => new AppError(`Invalid ${err.path}: ${err.value}`, 400);
 const handleDuplicateFieldsDB = (err) => {
-  const field = Object.keys(err.keyValue)[0];
-  return new AppError(`Duplicate value for field: ${field}`, 400);
+  const field = Object.keys(err.keyValue || {})[0] || 'field';
+  const label = field.charAt(0).toUpperCase() + field.slice(1);
+  return new AppError(`${label} already exists.`, 409);
 };
 const handleValidationErrorDB = (err) => {
   const messages = Object.values(err.errors).map((e) => e.message);
@@ -36,10 +37,8 @@ module.exports = (err, req, res, next) => {
   err.statusCode = err.statusCode || 500;
   err.status = err.status || 'error';
 
-  if (process.env.NODE_ENV === 'development') {
-    return sendErrorDev(err, res);
-  }
-
+  // Normalise known DB/JWT errors into friendly operational errors FIRST, so the
+  // message is clean in both development and production (e.g. "Email already exists.").
   let error = Object.assign(Object.create(Object.getPrototypeOf(err)), err);
   error.message = err.message;
 
@@ -48,6 +47,14 @@ module.exports = (err, req, res, next) => {
   if (err.name === 'ValidationError') error = handleValidationErrorDB(err);
   if (err.name === 'JsonWebTokenError') error = handleJWTError();
   if (err.name === 'TokenExpiredError') error = handleJWTExpiredError();
+
+  if (process.env.NODE_ENV === 'development') {
+    return res.status(error.statusCode || 500).json({
+      status:  error.status || 'error',
+      message: error.message,
+      stack:   err.stack,
+    });
+  }
 
   sendErrorProd(error, res);
 };

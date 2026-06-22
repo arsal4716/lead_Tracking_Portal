@@ -54,6 +54,11 @@ exports.create = catchAsync(async (req, res, next) => {
     }
   }
 
+  // Super admins have no publisher; never try to cast an empty string to ObjectId.
+  if (req.body.role === ROLES.SUPER_ADMIN || !req.body.publisher) {
+    delete req.body.publisher;
+  }
+
   const user = await User.create(req.body);
 
   await audit({
@@ -77,6 +82,9 @@ exports.update = catchAsync(async (req, res, next) => {
     if (req.body.role === ROLES.SUPER_ADMIN) delete req.body.role; // cannot promote to super_admin via API
     ['password', 'refreshToken'].forEach((f) => delete req.body[f]);
   }
+
+  // Don't cast an empty publisher to ObjectId.
+  if (req.body.publisher === '' || req.body.publisher === null) delete req.body.publisher;
 
   const user = await User.findOneAndUpdate(filter, req.body, {
     new: true, runValidators: true,
